@@ -13,7 +13,7 @@ echo [HyprKey Build] Compiling C/C++ sources (ImGui + Quirc QR + M3 HyprKey App)
 
 set CFLAGS=/std:c++20 /O2 /EHsc /MD /W3 /DUNICODE /D_UNICODE /DNDEBUG /I"imgui" /I"quirc" /I"src" /Fo"obj\\" /c
 set C_FLAGS=/O2 /MD /W3 /DNDEBUG /I"quirc" /Fo"obj\\" /c
-set LFLAGS=/OUT:"bin\hyprkey.exe" /SUBSYSTEM:WINDOWS /ENTRY:wWinMainCRTStartup d3d11.lib d3dcompiler.lib dxgi.lib winscard.lib dwmapi.lib user32.lib gdi32.lib shell32.lib
+set LFLAGS=/OUT:"bin\hyprkey.exe" /SUBSYSTEM:WINDOWS /ENTRY:wWinMainCRTStartup d3d11.lib d3dcompiler.lib dxgi.lib winscard.lib dwmapi.lib advapi32.lib user32.lib gdi32.lib shell32.lib
 
 :: 1. Compile C sources (quirc QR scanner)
 cl.exe %C_FLAGS% ^
@@ -56,6 +56,11 @@ copy /Y "bin\hyprkey.exe" "bin\hyprkey_md3_blue.exe" >nul
 copy /Y "bin\hyprkey.exe" "bin\hyprkey_nothing.exe" >nul
 copy /Y "bin\hyprkey.exe" "bin\hyprkey_circuit.exe" >nul
 copy /Y "bin\hyprkey.exe" "bin\hyprkey_linear.exe" >nul
+
+echo [HyprKey Build] Copying Material fonts to bin\...
+copy /Y "Roboto-Regular.ttf" "bin\" >nul
+copy /Y "Roboto-Bold.ttf" "bin\" >nul
+copy /Y "MaterialIcons-Regular.ttf" "bin\" >nul
 
 echo [HyprKey Build] SUCCESS: All Material 3 editions created in bin\
 dir /b bin\*.exe

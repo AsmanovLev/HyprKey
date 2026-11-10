@@ -3,10 +3,12 @@
 #include "imgui_impl_dx11.h"
 #include "scard_client.h"
 #include "ui.h"
+#include "system_theme.h"
 
 #include <d3d11.h>
 #include <tchar.h>
 #include <dwmapi.h>
+#include <stdio.h>
 
 #ifndef DWMWA_USE_IMMERSIVE_DARK_MODE
 #define DWMWA_USE_IMMERSIVE_DARK_MODE 20
@@ -19,6 +21,7 @@ static IDXGISwapChain*          g_pSwapChain = nullptr;
 static bool                     g_SwapChainOccluded = false;
 static UINT                     g_ResizeWidth = 0, g_ResizeHeight = 0;
 static ID3D11RenderTargetView*  g_mainRenderTargetView = nullptr;
+HWND                            g_MainHWnd = nullptr;
 
 // Forward declarations of helper functions
 bool CreateDeviceD3D(HWND hWnd);
@@ -26,6 +29,13 @@ void CleanupDeviceD3D();
 void CreateRenderTarget();
 void CleanupRenderTarget();
 LRESULT WINAPI WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
+
+// Helper to check file existence
+static bool FileExists(const char* path) {
+    if (!path || !path[0]) return false;
+    DWORD attr = GetFileAttributesA(path);
+    return (attr != INVALID_FILE_ATTRIBUTES && !(attr & FILE_ATTRIBUTE_DIRECTORY));
+}
 
 // Main code
 int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine, int nCmdShow)
@@ -36,23 +46,34 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
     ImGui_ImplWin32_EnableDpiAwareness();
 
     // Detect theme from executable filename
-    WCHAR exePath[MAX_PATH];
-    GetModuleFileNameW(NULL, exePath, MAX_PATH);
-    _wcslwr_s(exePath);
+    WCHAR exeFullPath[MAX_PATH];
+    GetModuleFileNameW(NULL, exeFullPath, MAX_PATH);
 
-    AppTheme initTheme = THEME_MD3;
-    const wchar_t* titleName = L"HyprKey [Material 3 Lavender Edition]";
+    WCHAR exeDir[MAX_PATH];
+    wcscpy_s(exeDir, exeFullPath);
+    WCHAR* lastSlash = wcsrchr(exeDir, L'\\');
+    if (lastSlash) *lastSlash = L'\0';
 
-    if (wcsstr(exePath, L"blue") || wcsstr(exePath, L"pixel")) {
+    WCHAR exeNameLower[MAX_PATH];
+    wcscpy_s(exeNameLower, exeFullPath);
+    _wcslwr_s(exeNameLower);
+
+    AppTheme initTheme = THEME_MD3_SYSTEM;
+    const wchar_t* titleName = L"HyprKey [Material You Dynamic Edition]";
+
+    if (wcsstr(exeNameLower, L"blue") || wcsstr(exeNameLower, L"pixel")) {
         initTheme = THEME_MD3_BLUE;
         titleName = L"HyprKey [Material 3 Pixel Blue Edition]";
-    } else if (wcsstr(exePath, L"nothing")) {
+    } else if (wcsstr(exeNameLower, L"lavender")) {
+        initTheme = THEME_MD3_LAVENDER;
+        titleName = L"HyprKey [Material 3 Lavender Edition]";
+    } else if (wcsstr(exeNameLower, L"nothing")) {
         initTheme = THEME_NOTHING;
         titleName = L"HyprKey [Nothing OS Glyph Edition]";
-    } else if (wcsstr(exePath, L"circuit")) {
+    } else if (wcsstr(exeNameLower, L"circuit")) {
         initTheme = THEME_CIRCUIT;
         titleName = L"HyprKey [Cyber Circuit PCB Edition]";
-    } else if (wcsstr(exePath, L"linear")) {
+    } else if (wcsstr(exeNameLower, L"linear")) {
         initTheme = THEME_LINEAR;
         titleName = L"HyprKey [Linear Stealth Edition]";
     }
@@ -70,8 +91,8 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
     };
     ::RegisterClassExW(&wc);
 
-    int window_width = 1120;
-    int window_height = 730;
+    int window_width = 1140;
+    int window_height = 740;
 
     // Center window on primary monitor
     int screen_w = GetSystemMetrics(SM_CXSCREEN);
@@ -86,9 +107,11 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
         pos_x, pos_y, window_width, window_height,
         nullptr, nullptr, wc.hInstance, nullptr
     );
+    g_MainHWnd = hwnd;
 
-    // Apply dark title bar (Windows 10/11)
-    BOOL use_dark_mode = TRUE;
+    // Query initial Windows dark mode
+    bool is_win_dark = M3_QueryWindowsDarkTheme();
+    BOOL use_dark_mode = is_win_dark ? TRUE : FALSE;
     ::DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, &use_dark_mode, sizeof(use_dark_mode));
 
     // Initialize Direct3D
@@ -109,7 +132,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
     ImGuiIO& io = ImGui::GetIO(); (void)io;
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
 
-    // Setup High-DPI Cyrillic + Latin Fonts
+    // Setup High-DPI Cyrillic + Latin Fonts with Material Design 3 Spec
     ImFontConfig font_cfg;
     font_cfg.OversampleH = 2;
     font_cfg.OversampleV = 2;
@@ -121,21 +144,67 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
         0,
     };
 
-    g_FontUI = io.Fonts->AddFontFromFileTTF("C:\\Windows\\Fonts\\segoeui.ttf", 18.0f, &font_cfg, glyph_ranges);
+    // Construct candidate paths for Roboto and Material Icons
+    char roboto_reg[MAX_PATH];
+    char roboto_bold[MAX_PATH];
+    char mat_icons[MAX_PATH];
+    sprintf_s(roboto_reg, "%ls\\Roboto-Regular.ttf", exeDir);
+    sprintf_s(roboto_bold, "%ls\\Roboto-Bold.ttf", exeDir);
+    sprintf_s(mat_icons, "%ls\\MaterialIcons-Regular.ttf", exeDir);
 
-    g_FontMono = io.Fonts->AddFontFromFileTTF("C:\\Windows\\Fonts\\CascadiaCode.ttf", 17.0f, &font_cfg, glyph_ranges);
-    if (!g_FontMono) {
-        g_FontMono = io.Fonts->AddFontFromFileTTF("C:\\Windows\\Fonts\\consola.ttf", 17.0f, &font_cfg, glyph_ranges);
+    const char* f_ui = FileExists(roboto_reg) ? roboto_reg : (FileExists("Roboto-Regular.ttf") ? "Roboto-Regular.ttf" : "C:\\Windows\\Fonts\\segoeui.ttf");
+    const char* f_title = FileExists(roboto_bold) ? roboto_bold : (FileExists("Roboto-Bold.ttf") ? "Roboto-Bold.ttf" : "C:\\Windows\\Fonts\\segoeuib.ttf");
+    const char* f_icons = FileExists(mat_icons) ? mat_icons : (FileExists("MaterialIcons-Regular.ttf") ? "MaterialIcons-Regular.ttf" : nullptr);
+
+    // 1. Primary UI Font (Roboto-Regular or Segoe UI)
+    g_FontUI = io.Fonts->AddFontFromFileTTF(f_ui, 17.5f, &font_cfg, glyph_ranges);
+    if (!g_FontUI) {
+        g_FontUI = io.Fonts->AddFontFromFileTTF("C:\\Windows\\Fonts\\segoeui.ttf", 18.0f, &font_cfg, glyph_ranges);
     }
 
-    g_FontTitle = io.Fonts->AddFontFromFileTTF("C:\\Windows\\Fonts\\segoeuib.ttf", 22.0f, &font_cfg, glyph_ranges);
+    // 2. Merge Google Material Icons into g_FontUI
+    if (f_icons) {
+        ImFontConfig icon_cfg;
+        icon_cfg.MergeMode = true;
+        icon_cfg.PixelSnapH = true;
+        icon_cfg.GlyphOffset = ImVec2(0.0f, 2.5f);
+        static const ImWchar icon_ranges[] = {
+            0xE000, 0xF8FF, // Material Icons Private Use Area
+            0,
+        };
+        io.Fonts->AddFontFromFileTTF(f_icons, 19.0f, &icon_cfg, icon_ranges);
+    }
+
+    // 3. Title Font (Roboto-Bold or Segoe UI Bold)
+    g_FontTitle = io.Fonts->AddFontFromFileTTF(f_title, 22.0f, &font_cfg, glyph_ranges);
     if (!g_FontTitle) {
-        g_FontTitle = io.Fonts->AddFontFromFileTTF("C:\\Windows\\Fonts\\segoeui.ttf", 22.0f, &font_cfg, glyph_ranges);
+        g_FontTitle = io.Fonts->AddFontFromFileTTF("C:\\Windows\\Fonts\\segoeuib.ttf", 22.0f, &font_cfg, glyph_ranges);
+    }
+    if (f_icons) {
+        ImFontConfig title_icon_cfg;
+        title_icon_cfg.MergeMode = true;
+        title_icon_cfg.PixelSnapH = true;
+        title_icon_cfg.GlyphOffset = ImVec2(0.0f, 3.0f);
+        static const ImWchar icon_ranges[] = {
+            0xE000, 0xF8FF,
+            0,
+        };
+        io.Fonts->AddFontFromFileTTF(f_icons, 22.0f, &title_icon_cfg, icon_ranges);
     }
 
-    g_FontTotpCode = io.Fonts->AddFontFromFileTTF("C:\\Windows\\Fonts\\CascadiaCode.ttf", 32.0f, &font_cfg, glyph_ranges);
+    // 4. Monospace Font for APDU Console and Hex Dumps
+    g_FontMono = io.Fonts->AddFontFromFileTTF("C:\\Windows\\Fonts\\CascadiaCode.ttf", 16.5f, &font_cfg, glyph_ranges);
+    if (!g_FontMono) {
+        g_FontMono = io.Fonts->AddFontFromFileTTF("C:\\Windows\\Fonts\\consola.ttf", 16.5f, &font_cfg, glyph_ranges);
+    }
 
-    // Apply Active Theme
+    // 5. Giant TOTP Display Font
+    g_FontTotpCode = io.Fonts->AddFontFromFileTTF("C:\\Windows\\Fonts\\CascadiaCode.ttf", 32.0f, &font_cfg, glyph_ranges);
+    if (!g_FontTotpCode && g_FontMono) {
+        g_FontTotpCode = g_FontMono;
+    }
+
+    // Apply Initial Theme
     ApplyTheme(initTheme);
 
     // Setup Platform/Renderer backends
@@ -251,7 +320,8 @@ bool CreateDeviceD3D(HWND hWnd)
         D3D_DRIVER_TYPE_HARDWARE,
         nullptr,
         createDeviceFlags,
-        featureLevelArray, 2,
+        featureLevelArray,
+        2,
         D3D11_SDK_VERSION,
         &sd,
         &g_pSwapChain,
@@ -260,19 +330,7 @@ bool CreateDeviceD3D(HWND hWnd)
         &g_pd3dDeviceContext
     );
     if (res == DXGI_ERROR_UNSUPPORTED)
-        res = D3D11CreateDeviceAndSwapChain(
-            nullptr,
-            D3D_DRIVER_TYPE_WARP,
-            nullptr,
-            createDeviceFlags,
-            featureLevelArray, 2,
-            D3D11_SDK_VERSION,
-            &sd,
-            &g_pSwapChain,
-            &g_pd3dDevice,
-            &featureLevel,
-            &g_pd3dDeviceContext
-        );
+        res = D3D11CreateDeviceAndSwapChain(nullptr, D3D_DRIVER_TYPE_WARP, nullptr, createDeviceFlags, featureLevelArray, 2, D3D11_SDK_VERSION, &sd, &g_pSwapChain, &g_pd3dDevice, &featureLevel, &g_pd3dDeviceContext);
     if (res != S_OK)
         return false;
 
@@ -290,13 +348,10 @@ void CleanupDeviceD3D()
 
 void CreateRenderTarget()
 {
-    ID3D11Texture2D* pBackBuffer = nullptr;
+    ID3D11Texture2D* pBackBuffer;
     g_pSwapChain->GetBuffer(0, IID_PPV_ARGS(&pBackBuffer));
-    if (pBackBuffer)
-    {
-        g_pd3dDevice->CreateRenderTargetView(pBackBuffer, nullptr, &g_mainRenderTargetView);
-        pBackBuffer->Release();
-    }
+    g_pd3dDevice->CreateRenderTargetView(pBackBuffer, nullptr, &g_mainRenderTargetView);
+    pBackBuffer->Release();
 }
 
 void CleanupRenderTarget()
@@ -304,6 +359,7 @@ void CleanupRenderTarget()
     if (g_mainRenderTargetView) { g_mainRenderTargetView->Release(); g_mainRenderTargetView = nullptr; }
 }
 
+// Forward declare message handler from imgui_impl_win32.cpp
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
 LRESULT WINAPI WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
