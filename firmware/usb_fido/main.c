@@ -6,6 +6,7 @@
 #include "ccid/ccid.h"
 #include "openpgp/openpgp.h"
 #include "oath/oath.h"
+#include "device_log.h"
 
 /* ==================== nRF52840 Registers ==================== */
 #define P0_BASE               0x50000000UL
@@ -1018,6 +1019,14 @@ static void handle_ep0_setup(void) {
 
 /* ==================== Main Application ==================== */
 int main(void) {
+    /* 0. SysTick: 1 ms tick @ 64 MHz */
+    #define SYST_CSR   (*(volatile uint32_t *)0xE000E010UL)
+    #define SYST_RVR   (*(volatile uint32_t *)0xE000E014UL)
+    #define SYST_CVR   (*(volatile uint32_t *)0xE000E018UL)
+    SYST_RVR = 64000 - 1;
+    SYST_CVR = 0;
+    SYST_CSR = 7; /* CLKSOURCE(4) | TICKINT(2) | ENABLE(1) */
+
     /* 1. Configure LED */
     P0_DIRSET = (1UL << PIN_LED);
     P0_PIN_CNF(PIN_LED) = 0x00000001UL;
@@ -1209,6 +1218,10 @@ void Default_Handler(void) {
     while (1);
 }
 
+void SysTick_Handler(void) {
+    g_uptime_ms++;
+}
+
 __attribute__((section(".isr_vector"), used))
 const uint32_t vector_table[] = {
     (uint32_t)&_estack,
@@ -1223,5 +1236,5 @@ const uint32_t vector_table[] = {
     (uint32_t)Default_Handler, /* DebugMon */
     0,
     (uint32_t)Default_Handler, /* PendSV */
-    (uint32_t)Default_Handler, /* SysTick */
+    (uint32_t)SysTick_Handler, /* SysTick */
 };

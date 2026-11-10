@@ -37,6 +37,16 @@ struct ApduLogEntry {
     std::string desc;
 };
 
+struct DeviceLogRecord {
+    uint32_t    timestamp_ms;
+    std::string time_str;
+    std::string module;
+    std::string severity;
+    std::string event_name;
+    std::string details;
+    uint16_t    sw;
+};
+
 class SCardClient {
 public:
     SCardClient();
@@ -48,6 +58,10 @@ public:
     const std::string& get_reader_name() const { return m_reader_name; }
 
     bool transmit(const std::vector<uint8_t>& apdu, std::vector<uint8_t>& rsp, uint16_t& sw, const std::string& desc = "");
+
+    // In-Memory Device Binary Logs (over CCID, no COM needed)
+    bool fetch_device_logs(std::vector<DeviceLogRecord>& out_records);
+    bool clear_device_logs();
 
     // OATH Applet
     bool oath_select();

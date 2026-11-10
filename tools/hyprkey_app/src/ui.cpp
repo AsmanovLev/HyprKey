@@ -745,14 +745,59 @@ void RenderHyprKeyUI(SCardClient& client) {
         }
 
         // -----------------------------------------------------------------
-        // VIEW 2: APDU TERMINAL CONSOLE
+        // VIEW 2: APDU TERMINAL CONSOLE & DEVICE TAIL LOGS
         // -----------------------------------------------------------------
         else if (s_active_nav == 2) {
-            if (ImGui::Button(ICON_MD_DELETE "  Clear Logs", ImVec2(120, 30))) {
-                client.clear_logs();
+            static int s_log_mode = 0; // 0 = Host USB CCID Stream, 1 = Device In-Memory Tail
+            static std::vector<DeviceLogRecord> s_device_logs;
+            static bool s_auto_tail = true;
+            static double s_last_device_fetch = 0.0;
+
+            // Log Source Selector
+            ImGui::PushStyleColor(ImGuiCol_Button, (s_log_mode == 0) ? container_col : ImGui::GetStyleColorVec4(ImGuiCol_FrameBg));
+            ImGui::PushStyleColor(ImGuiCol_Text, (s_log_mode == 0) ? on_container_col : ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+            if (ImGui::Button("Host USB CCID Stream", ImVec2(180, 32))) {
+                s_log_mode = 0;
             }
+            ImGui::PopStyleColor(2);
+
             ImGui::SameLine();
-            ImGui::TextDisabled("Live stream of ISO 7816-4 APDU transactions over USB CCID");
+            ImGui::PushStyleColor(ImGuiCol_Button, (s_log_mode == 1) ? container_col : ImGui::GetStyleColorVec4(ImGuiCol_FrameBg));
+            ImGui::PushStyleColor(ImGuiCol_Text, (s_log_mode == 1) ? on_container_col : ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+            if (ImGui::Button(ICON_MD_MEMORY "  Device Tail Logs (CCID APDU)", ImVec2(240, 32))) {
+                s_log_mode = 1;
+                client.fetch_device_logs(s_device_logs);
+            }
+            ImGui::PopStyleColor(2);
+
+            ImGui::SameLine();
+            ImGui::Spacing();
+            ImGui::SameLine();
+
+            if (s_log_mode == 0) {
+                if (ImGui::Button(ICON_MD_DELETE "  Clear Host Logs", ImVec2(140, 32))) {
+                    client.clear_logs();
+                }
+                ImGui::SameLine();
+                ImGui::TextDisabled("Live stream of ISO 7816-4 APDU transactions captured on PC host");
+            } else {
+                if (ImGui::Button(ICON_MD_REFRESH "  Fetch Tail", ImVec2(110, 32))) {
+                    client.fetch_device_logs(s_device_logs);
+                }
+                ImGui::SameLine();
+                if (ImGui::Button(ICON_MD_DELETE "  Clear Device Buffer", ImVec2(170, 32))) {
+                    client.clear_device_logs();
+                    client.fetch_device_logs(s_device_logs);
+                }
+                ImGui::SameLine();
+                ImGui::Checkbox("Auto-Tail (0.5s)", &s_auto_tail);
+
+                // Auto fetch every 0.5s
+                if (s_auto_tail && client.is_connected() && (current_time - s_last_device_fetch > 0.5)) {
+                    s_last_device_fetch = current_time;
+                    client.fetch_device_logs(s_device_logs);
+                }
+            }
 
             ImGui::Separator();
             ImGui::Spacing();
@@ -760,21 +805,57 @@ void RenderHyprKeyUI(SCardClient& client) {
             ImGui::BeginChild("M3LogScrollRegion", ImVec2(0, 0), false, ImGuiWindowFlags_HorizontalScrollbar);
             {
                 if (g_FontMono) ImGui::PushFont(g_FontMono);
-                auto logs = client.get_logs();
-                for (const auto& l : logs) {
-                    if (l.is_tx) {
-                        ImGui::TextColored(accent_col, "[%s] >> TX:", l.time_str.c_str());
-                    } else {
-                        ImU32 sw_col = (l.sw == 0x9000) ? IM_COL32(133, 221, 162, 255) : IM_COL32(242, 184, 181, 255);
-                        ImGui::TextColored(ImColor(sw_col), "[%s] << RX (SW=%04X):", l.time_str.c_str(), l.sw);
-                    }
-                    ImGui::SameLine();
-                    ImGui::Text("%s", l.hex_data.c_str());
-                    if (!l.desc.empty()) {
+
+                if (s_log_mode == 0) {
+                    auto logs = client.get_logs();
+                    for (const auto& l : logs) {
+                        if (l.is_tx) {
+                            ImGui::TextColored(accent_col, "[%s] >> TX:", l.time_str.c_str());
+                        } else {
+                            ImU32 sw_col = (l.sw == 0x9000) ? IM_COL32(133, 221, 162, 255) : IM_COL32(242, 184, 181, 255);
+                            ImGui::TextColored(ImColor(sw_col), "[%s] << RX (SW=%04X):", l.time_str.c_str(), l.sw);
+                        }
                         ImGui::SameLine();
-                        ImGui::TextDisabled("(%s)", l.desc.c_str());
+                        ImGui::Text("%s", l.hex_data.c_str());
+                        if (!l.desc.empty()) {
+                            ImGui::SameLine();
+                            ImGui::TextDisabled("(%s)", l.desc.c_str());
+                        }
+                    }
+                } else {
+                    if (s_device_logs.empty()) {
+                        ImGui::TextDisabled("No device log entries recorded yet or device firmware does not support Vendor APDU 0xFF 0xFD.");
+                        ImGui::TextDisabled("Click 'Fetch Tail' or flash the updated usb_fido.uf2 onto HyprKey.");
+                    } else {
+                        for (const auto& rec : s_device_logs) {
+                            // Timestamp
+                            ImGui::TextDisabled("[%s]", rec.time_str.c_str());
+                            ImGui::SameLine();
+
+                            // Module tag
+                            ImGui::TextColored(container_col, "[%-6s]", rec.module.c_str());
+                            ImGui::SameLine();
+
+                            // Severity
+                            if (rec.severity == "ERROR") {
+                                ImGui::TextColored(ImVec4(0.95f, 0.35f, 0.35f, 1.0f), "[ERR]");
+                            } else if (rec.severity == "WARN") {
+                                ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.20f, 1.0f), "[WRN]");
+                            } else {
+                                ImGui::TextDisabled("[INF]");
+                            }
+                            ImGui::SameLine();
+
+                            // Event name
+                            ImGui::TextColored(accent_col, "%-16s", rec.event_name.c_str());
+                            ImGui::SameLine();
+
+                            // Details
+                            ImGui::Text("%s", rec.details.c_str());
+                        }
                     }
                 }
+
                 if (g_FontMono) ImGui::PopFont();
 
                 if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY()) {

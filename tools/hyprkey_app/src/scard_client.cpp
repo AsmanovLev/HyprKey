@@ -390,3 +390,115 @@ bool SCardClient::openpgp_set_url(const std::string& url) {
     uint16_t sw = 0;
     return transmit(apdu, rsp, sw, "OpenPGP: PUT URL") && (sw == 0x9000);
 }
+
+bool SCardClient::fetch_device_logs(std::vector<DeviceLogRecord>& out_records) {
+    out_records.clear();
+    // Vendor APDU: CLA=FF, INS=FD, P1=00 (Read Tail), P2=40 (up to 64 records), Le=00
+    std::vector<uint8_t> apdu = { 0xFF, 0xFD, 0x00, 0x40, 0x00 };
+    std::vector<uint8_t> rsp;
+    uint16_t sw = 0;
+    if (!transmit(apdu, rsp, sw, "Device: READ TAIL LOGS") || sw != 0x9000 || rsp.size() < 9) {
+        return false;
+    }
+
+    uint8_t count = rsp[8];
+    const uint8_t* p = rsp.data() + 9;
+    size_t rem = rsp.size() - 9;
+
+    for (uint8_t i = 0; i < count && rem >= 16; i++) {
+        uint32_t ts_ms = (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+        uint8_t mod_id = p[4];
+        uint8_t sev_id = p[5];
+        uint16_t evt_id = (uint16_t)p[6] | ((uint16_t)p[7] << 8);
+        uint32_t arg0 = (uint32_t)p[8] | ((uint32_t)p[9] << 8) | ((uint32_t)p[10] << 16) | ((uint32_t)p[11] << 24);
+        uint32_t arg1 = (uint32_t)p[12] | ((uint32_t)p[13] << 8) | ((uint32_t)p[14] << 16) | ((uint32_t)p[15] << 24);
+
+        DeviceLogRecord rec;
+        rec.timestamp_ms = ts_ms;
+        rec.sw = 0;
+        char buf[32];
+        snprintf(buf, sizeof(buf), "%7.3fs", ts_ms / 1000.0f);
+        rec.time_str = buf;
+
+        switch (mod_id) {
+            case 1: rec.module = "SYS"; break;
+            case 2: rec.module = "USB"; break;
+            case 3: rec.module = "CCID"; break;
+            case 4: rec.module = "CTAP2"; break;
+            case 5: rec.module = "OATH"; break;
+            case 6: rec.module = "OPENPGP"; break;
+            case 7: rec.module = "PIV"; break;
+            case 8: rec.module = "CRYPTO"; break;
+            case 9: rec.module = "TOUCH"; break;
+            default: rec.module = "MOD_" + std::to_string(mod_id); break;
+        }
+
+        switch (sev_id) {
+            case 0: rec.severity = "INFO"; break;
+            case 1: rec.severity = "WARN"; break;
+            case 2: rec.severity = "ERROR"; break;
+            default: rec.severity = "INFO"; break;
+        }
+
+        switch (evt_id) {
+            case 0x0001: rec.event_name = "BOOT"; break;
+            case 0x0002: rec.event_name = "USB_RESET"; break;
+            case 0x0003: rec.event_name = "USB_CONFIG"; break;
+            case 0x0004: rec.event_name = "USB_SUSPEND"; break;
+            case 0x0010: rec.event_name = "CCID_ICC_ON"; break;
+            case 0x0011: rec.event_name = "CCID_ICC_OFF"; break;
+            case 0x0012: rec.event_name = "CCID_XFR_APDU"; break;
+            case 0x0013: rec.event_name = "CCID_ROUTE"; break;
+            case 0x0014: rec.event_name = "CCID_SW"; break;
+            case 0x0020: rec.event_name = "OATH_SELECT"; break;
+            case 0x0021: rec.event_name = "OATH_CALC"; break;
+            case 0x0022: rec.event_name = "OATH_PUT"; break;
+            case 0x0023: rec.event_name = "OATH_DEL"; break;
+            case 0x0030: rec.event_name = "PGP_SELECT"; break;
+            case 0x0031: rec.event_name = "PGP_VERIFY_PW1"; break;
+            case 0x0032: rec.event_name = "PGP_VERIFY_PW3"; break;
+            case 0x0033: rec.event_name = "PGP_CHANGE_PW"; break;
+            case 0x0034: rec.event_name = "PGP_GEN_KEY"; break;
+            case 0x0035: rec.event_name = "PGP_SIGN"; break;
+            case 0x0036: rec.event_name = "PGP_DEC"; break;
+            default: {
+                char eb[32];
+                snprintf(eb, sizeof(eb), "EVT_%04X", evt_id);
+                rec.event_name = eb;
+                break;
+            }
+        }
+
+        if (evt_id == 0x0012) {
+            uint8_t cla = (arg0 >> 24) & 0xFF;
+            uint8_t ins = (arg0 >> 16) & 0xFF;
+            uint8_t p1_val = (arg0 >> 8) & 0xFF;
+            uint8_t p2_val = arg0 & 0xFF;
+            char dbuf[64];
+            snprintf(dbuf, sizeof(dbuf), "APDU [%02X %02X %02X %02X] len=%u", cla, ins, p1_val, p2_val, arg1);
+            rec.details = dbuf;
+        } else if (evt_id == 0x0014) {
+            const char* applet = (arg0 == 0) ? "OpenPGP" : (arg0 == 1 ? "PIV" : "OATH");
+            char dbuf[64];
+            snprintf(dbuf, sizeof(dbuf), "%s returned SW=%04X", applet, arg1);
+            rec.details = dbuf;
+            rec.sw = (uint16_t)arg1;
+        } else {
+            char dbuf[64];
+            snprintf(dbuf, sizeof(dbuf), "arg0=0x%08X arg1=0x%08X", arg0, arg1);
+            rec.details = dbuf;
+        }
+
+        out_records.push_back(rec);
+        p += 16;
+        rem -= 16;
+    }
+    return true;
+}
+
+bool SCardClient::clear_device_logs() {
+    std::vector<uint8_t> apdu = { 0xFF, 0xFD, 0x01, 0x00, 0x00 };
+    std::vector<uint8_t> rsp;
+    uint16_t sw = 0;
+    return transmit(apdu, rsp, sw, "Device: CLEAR LOGS") && (sw == 0x9000);
+}

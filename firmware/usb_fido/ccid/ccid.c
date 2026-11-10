@@ -2,6 +2,7 @@
 #include "openpgp/openpgp.h"
 #include "piv/piv.h"
 #include "oath/oath.h"
+#include "device_log.h"
 #include <string.h>
 
 typedef enum {
@@ -13,6 +14,7 @@ typedef enum {
 static ccid_applet_t s_active_applet = CCID_APPLET_OPENPGP;
 
 void ccid_init(void) {
+    dev_log_init();
     openpgp_init();
     piv_init();
     oath_init();
@@ -107,16 +109,39 @@ uint16_t ccid_process_message(const uint8_t *req, uint16_t req_len, uint8_t *rsp
                 apdu_len = req_len - 10;
             }
 
+            /* Log incoming APDU header: CLA INS P1 P2 */
+            uint32_t apdu_hdr = (apdu_len >= 4) ? (((uint32_t)apdu[0] << 24) | ((uint32_t)apdu[1] << 16) | ((uint32_t)apdu[2] << 8) | apdu[3]) : 0;
+            dev_log(DEV_LOG_MOD_CCID, DEV_LOG_SEV_INFO, DEV_LOG_EVT_CCID_XFR, apdu_hdr, apdu_len);
+
+            /* Intercept Vendor APDU for In-Memory Device Logs (CLA=0xFF, INS=0xFD) */
+            if (apdu_len >= 4 && apdu[0] == 0xFF && apdu[1] == 0xFD) {
+                uint16_t apdu_rsp_len = dev_log_process_apdu(apdu, apdu_len, rsp + 10, max_rsp_len - 10);
+                rsp[0] = CCID_RDR_TO_PC_DATA_BLOCK;
+                rsp[1] = (uint8_t)(apdu_rsp_len & 0xFF);
+                rsp[2] = (uint8_t)((apdu_rsp_len >> 8) & 0xFF);
+                rsp[3] = 0;
+                rsp[4] = 0;
+                rsp[5] = slot;
+                rsp[6] = seq;
+                rsp[7] = 0x00; /* Success, card active */
+                rsp[8] = 0x00;
+                rsp[9] = 0x00;
+                return 10 + apdu_rsp_len;
+            }
+
             /* Explicit Applet Switching on SELECT AID (00 A4 04 ...) */
             if (apdu_len >= 5 && apdu[1] == 0xA4 && apdu[2] == 0x04) {
                 uint8_t aid_len = apdu[4];
                 const uint8_t *aid = apdu + 5;
                 if (aid_len >= 7 && memcmp(aid, "\xA0\x00\x00\x05\x27\x21\x01", 7) == 0) {
                     s_active_applet = CCID_APPLET_OATH;
+                    dev_log(DEV_LOG_MOD_OATH, DEV_LOG_SEV_INFO, DEV_LOG_EVT_OATH_SELECT, 0, 0);
                 } else if (aid_len >= 11 && memcmp(aid, "\xA0\x00\x00\x03\x08\x00\x00\x10\x00\x01\x00", 11) == 0) {
                     s_active_applet = CCID_APPLET_PIV;
+                    dev_log(DEV_LOG_MOD_PIV, DEV_LOG_SEV_INFO, DEV_LOG_EVT_CCID_APDU_ROUTE, CCID_APPLET_PIV, 0);
                 } else if (aid_len >= 6 && memcmp(aid, "\xD2\x76\x00\x01\x24\x01", 6) == 0) {
                     s_active_applet = CCID_APPLET_OPENPGP;
+                    dev_log(DEV_LOG_MOD_OPENPGP, DEV_LOG_SEV_INFO, DEV_LOG_EVT_PGP_SELECT, 0, 0);
                 }
             }
 
@@ -128,6 +153,10 @@ uint16_t ccid_process_message(const uint8_t *req, uint16_t req_len, uint8_t *rsp
             } else {
                 apdu_rsp_len = openpgp_process_apdu(apdu, apdu_len, rsp + 10, max_rsp_len - 10);
             }
+
+            /* Log SW response */
+            uint16_t sw = (apdu_rsp_len >= 2) ? (((uint16_t)rsp[10 + apdu_rsp_len - 2] << 8) | rsp[10 + apdu_rsp_len - 1]) : 0;
+            dev_log(DEV_LOG_MOD_CCID, (sw == 0x9000) ? DEV_LOG_SEV_INFO : DEV_LOG_SEV_WARN, DEV_LOG_EVT_CCID_SW, s_active_applet, sw);
 
             rsp[0] = CCID_RDR_TO_PC_DATA_BLOCK;
             rsp[1] = (uint8_t)(apdu_rsp_len & 0xFF);

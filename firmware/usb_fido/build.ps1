@@ -7,7 +7,7 @@ Set-Location "S:\hyprkey\firmware\usb_fido"
     -ffunction-sections -fdata-sections -T "linker.ld" -nostartfiles "-Wl,--gc-sections" `
     -DuECC_CURVE=uECC_secp256r1 -DuECC_OPTIMIZATION_LEVEL=3 -DuECC_SQUARE_FUNC=1 `
     -I. -Imicro_ecc -Isha256 -Imldsa -Imlkem -Ifips202 -Iccid -Iopenpgp -Ipiv -Isha512 -Ied25519 -Ioath -Isha1 `
-    main.c fido_u2f.c ctap2.c ccid/ccid.c openpgp/openpgp.c piv/piv.c mldsa/mldsa.c mlkem/mlkem.c fips202/fips202.c micro_ecc/uECC.c sha256/sha256.c sha512/sha512.c ed25519/ed25519.c sha1/sha1.c oath/oath.c -lgcc -o "usb_fido.elf"
+    main.c device_log.c fido_u2f.c ctap2.c ccid/ccid.c openpgp/openpgp.c piv/piv.c mldsa/mldsa.c mlkem/mlkem.c fips202/fips202.c micro_ecc/uECC.c sha256/sha256.c sha512/sha512.c ed25519/ed25519.c sha1/sha1.c oath/oath.c -lgcc -o "usb_fido.elf"
 
 if ($LASTEXITCODE -ne 0) {
     Write-Error "GCC build failed"
