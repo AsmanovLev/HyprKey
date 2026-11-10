@@ -799,6 +799,21 @@ static void send_ccid_response(const uint8_t *data, uint16_t len) {
     }
 }
 
+#define NRF_POWER_GPREGRET  (*(volatile uint32_t *)0x4000051CUL)
+#define DFU_MAGIC_UF2_RESET 0x57
+#define SCB_AIRCR           (*(volatile uint32_t *)0xE000ED0CUL)
+
+void system_reboot_to_bootloader(void) {
+    dev_log(DEV_LOG_MOD_SYS, DEV_LOG_SEV_WARN, 0xDF, 0, 0);
+    uart_puts("\r\n[SYS] Rebooting to UF2 Bootloader (DFU)...\r\n");
+    for (volatile int i = 0; i < 200000; i++);
+    USBD_USBPULLUP = 0; /* Detach USB */
+    for (volatile int i = 0; i < 300000; i++);
+    NRF_POWER_GPREGRET = DFU_MAGIC_UF2_RESET;
+    SCB_AIRCR = 0x05FA0004UL; /* NVIC_SystemReset */
+    while (1);
+}
+
 static void process_incoming_ccid_packet(const uint8_t *pkt, uint8_t len) {
     if (m_ccid_rx_len == 0) {
         /* First packet contains 10-byte CCID header */
@@ -839,6 +854,10 @@ static void process_incoming_ccid_packet(const uint8_t *pkt, uint8_t len) {
         send_ccid_response(m_ccid_tx_buf, rsp_len);
         m_ccid_rx_len = 0;
         m_ccid_rx_expected = 0;
+
+        if (g_dfu_reset_pending) {
+            system_reboot_to_bootloader();
+        }
     }
 }
 
@@ -1034,6 +1053,25 @@ int main(void) {
 
     /* 1b. Configure Touch / Button Pin (P0.11) with internal pull-down */
     P0_PIN_CNF(PIN_TOUCH) = 0x00000004UL;
+
+    /* 1c. Emergency Bootloader Recovery: hold Touch (P0.11) for ~2s on boot */
+    if (P0_IN & (1UL << PIN_TOUCH)) {
+        int held_count = 0;
+        for (int i = 0; i < 200; i++) {
+            for (volatile int d = 0; d < 6400; d++); /* ~10 ms delay */
+            if (P0_IN & (1UL << PIN_TOUCH)) {
+                held_count++;
+                if ((held_count % 20) < 10) P0_OUTCLR = (1UL << PIN_LED);
+                else P0_OUTSET = (1UL << PIN_LED);
+            } else {
+                break;
+            }
+        }
+        if (held_count >= 180) {
+            P0_OUTSET = (1UL << PIN_LED);
+            system_reboot_to_bootloader();
+        }
+    }
 
     /* 2. Configure Debug UART (P0.10) */
     uart_init();

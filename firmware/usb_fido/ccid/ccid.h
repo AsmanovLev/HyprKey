@@ -36,6 +36,8 @@ typedef struct __attribute__((packed)) {
 
 void ccid_init(void);
 
+extern volatile uint8_t g_dfu_reset_pending;
+
 /* Process a complete CCID command from host and write response.
  * Returns length of response written to rsp. */
 uint16_t ccid_process_message(const uint8_t *req, uint16_t req_len, uint8_t *rsp, uint16_t max_rsp_len);

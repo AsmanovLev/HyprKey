@@ -12,6 +12,7 @@ typedef enum {
 } ccid_applet_t;
 
 static ccid_applet_t s_active_applet = CCID_APPLET_OPENPGP;
+volatile uint8_t g_dfu_reset_pending = 0;
 
 void ccid_init(void) {
     dev_log_init();
@@ -112,6 +113,23 @@ uint16_t ccid_process_message(const uint8_t *req, uint16_t req_len, uint8_t *rsp
             /* Log incoming APDU header: CLA INS P1 P2 */
             uint32_t apdu_hdr = (apdu_len >= 4) ? (((uint32_t)apdu[0] << 24) | ((uint32_t)apdu[1] << 16) | ((uint32_t)apdu[2] << 8) | apdu[3]) : 0;
             dev_log(DEV_LOG_MOD_CCID, DEV_LOG_SEV_INFO, DEV_LOG_EVT_CCID_XFR, apdu_hdr, apdu_len);
+
+            /* Intercept Vendor APDU for DFU Bootloader Reset (FF FD 42 00 or FF FE 00 00) */
+            if (apdu_len >= 4 && ((apdu[0] == 0xFF && apdu[1] == 0xFD && apdu[2] == 0x42) ||
+                                  (apdu[0] == 0xFF && apdu[1] == 0xFE))) {
+                dev_log(DEV_LOG_MOD_SYS, DEV_LOG_SEV_WARN, 0xDF, 0, 0);
+                g_dfu_reset_pending = 1;
+                rsp[0] = CCID_RDR_TO_PC_DATA_BLOCK;
+                rsp[1] = 2; rsp[2] = 0; rsp[3] = 0; rsp[4] = 0;
+                rsp[5] = slot;
+                rsp[6] = seq;
+                rsp[7] = 0x00; /* Success, card active */
+                rsp[8] = 0x00;
+                rsp[9] = 0x00;
+                rsp[10] = 0x90; /* SW1 = 0x90 */
+                rsp[11] = 0x00; /* SW2 = 0x00 */
+                return 12;
+            }
 
             /* Intercept Vendor APDU for In-Memory Device Logs (CLA=0xFF, INS=0xFD) */
             if (apdu_len >= 4 && apdu[0] == 0xFF && apdu[1] == 0xFD) {
