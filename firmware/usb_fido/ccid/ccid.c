@@ -3,6 +3,7 @@
 #include "piv/piv.h"
 #include "oath/oath.h"
 #include "device_log.h"
+#include "storage_flash.h"
 #include <string.h>
 
 typedef enum {
@@ -113,6 +114,22 @@ uint16_t ccid_process_message(const uint8_t *req, uint16_t req_len, uint8_t *rsp
             /* Log incoming APDU header: CLA INS P1 P2 */
             uint32_t apdu_hdr = (apdu_len >= 4) ? (((uint32_t)apdu[0] << 24) | ((uint32_t)apdu[1] << 16) | ((uint32_t)apdu[2] << 8) | apdu[3]) : 0;
             dev_log(DEV_LOG_MOD_CCID, DEV_LOG_SEV_INFO, DEV_LOG_EVT_CCID_XFR, apdu_hdr, apdu_len);
+
+            /* Intercept Vendor APDU for Live Seamless A/B OTA (CLA=0xFF, INS=0xFC) */
+            if (apdu_len >= 4 && apdu[0] == 0xFF && apdu[1] == 0xFC) {
+                uint16_t apdu_rsp_len = ota_process_apdu(apdu, apdu_len, rsp + 10, max_rsp_len - 10);
+                rsp[0] = CCID_RDR_TO_PC_DATA_BLOCK;
+                rsp[1] = (uint8_t)(apdu_rsp_len & 0xFF);
+                rsp[2] = (uint8_t)((apdu_rsp_len >> 8) & 0xFF);
+                rsp[3] = 0;
+                rsp[4] = 0;
+                rsp[5] = slot;
+                rsp[6] = seq;
+                rsp[7] = 0x00; /* Success, card active */
+                rsp[8] = 0x00;
+                rsp[9] = 0x00;
+                return 10 + apdu_rsp_len;
+            }
 
             /* Intercept Vendor APDU for DFU Bootloader Reset (FF FD 42 00 or FF FE 00 00) */
             if (apdu_len >= 4 && ((apdu[0] == 0xFF && apdu[1] == 0xFD && apdu[2] == 0x42) ||

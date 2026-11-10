@@ -18,10 +18,10 @@ typedef struct __attribute__((packed)) {
     uint32_t magic;         /* 'HYPR' */
     uint32_t flags;         /* OTA_FLAG_* */
     uint32_t image_size;    /* payload size in bytes */
-    uint32_t crc32;         /* image CRC32 */
     uint32_t version;       /* semantic version / build number */
     uint32_t boot_count;    /* trial boot attempts */
-    uint32_t reserved[10];
+    uint8_t  sha256[32];    /* SHA-256 digest */
+    uint32_t reserved[6];
 } ota_meta_t;
 
 /* ==================== Hardware Registers ==================== */

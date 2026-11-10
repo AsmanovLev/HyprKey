@@ -41,4 +41,12 @@ bool ota_staging_erase(void);
 bool ota_staging_write_chunk(uint32_t offset, const void *data, size_t len);
 bool ota_staging_finalize_and_reboot(uint32_t image_size, uint32_t crc32, uint32_t version);
 
+/* ==================== High-level Autonomous OTA API ==================== */
+uint8_t ota_get_current_slot(void);
+uint8_t ota_get_target_slot(void);
+bool ota_session_begin(uint8_t *cur_slot, uint8_t *tgt_slot);
+bool ota_session_write(uint32_t offset, const uint8_t *data, size_t len);
+bool ota_session_finalize(uint32_t total_size, const uint8_t expected_hash[32]);
+uint16_t ota_process_apdu(const uint8_t *apdu, uint16_t apdu_len, uint8_t *rsp, uint16_t max_rsp_len);
+
 #endif /* STORAGE_FLASH_H */

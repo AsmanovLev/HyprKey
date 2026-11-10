@@ -858,6 +858,14 @@ static void process_incoming_ccid_packet(const uint8_t *pkt, uint8_t len) {
         if (g_dfu_reset_pending) {
             system_reboot_to_bootloader();
         }
+
+        extern volatile uint8_t g_ota_reboot_pending;
+        if (g_ota_reboot_pending) {
+            uart_puts("\r\n[OTA] Update verified via SHA-256. Rebooting into Stage-2...\r\n");
+            for (volatile int d = 0; d < 200000; d++);
+            SCB_AIRCR = 0x05FA0004UL; /* NVIC_SystemReset */
+            while (1);
+        }
     }
 }
 
