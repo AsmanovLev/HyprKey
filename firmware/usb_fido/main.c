@@ -1200,7 +1200,21 @@ int main(void) {
 extern uint32_t _estack;
 extern uint32_t _etext, _sdata, _edata, _sbss, _ebss;
 
+void HardFault_Handler(void) {
+    uart_puts("\r\n!!! HARDFAULT !!!\r\n");
+    while (1);
+}
+
+void Default_Handler(void) {
+    while (1);
+}
+
+void SysTick_Handler(void) {
+    g_uptime_ms++;
+}
+
 void Reset_Handler(void) {
+    (*(volatile uint32_t *)0xE000ED08UL) = 0x00026000UL; /* Relocate VTOR */
     uint32_t *src = &_etext;
     uint32_t *dst = &_sdata;
     while (dst < &_edata) {
@@ -1214,27 +1228,19 @@ void Reset_Handler(void) {
     while (1);
 }
 
-void Default_Handler(void) {
-    while (1);
-}
-
-void SysTick_Handler(void) {
-    g_uptime_ms++;
-}
-
 __attribute__((section(".isr_vector"), used))
 const uint32_t vector_table[] = {
     (uint32_t)&_estack,
     (uint32_t)Reset_Handler,
-    (uint32_t)Default_Handler, /* NMI */
-    (uint32_t)Default_Handler, /* HardFault */
-    (uint32_t)Default_Handler, /* MemManage */
-    (uint32_t)Default_Handler, /* BusFault */
-    (uint32_t)Default_Handler, /* UsageFault */
+    (uint32_t)Default_Handler,   /* NMI */
+    (uint32_t)HardFault_Handler, /* HardFault */
+    (uint32_t)Default_Handler,   /* MemManage */
+    (uint32_t)Default_Handler,   /* BusFault */
+    (uint32_t)Default_Handler,   /* UsageFault */
     0, 0, 0, 0,
-    (uint32_t)Default_Handler, /* SVCall */
-    (uint32_t)Default_Handler, /* DebugMon */
+    (uint32_t)Default_Handler,   /* SVCall */
+    (uint32_t)Default_Handler,   /* DebugMon */
     0,
-    (uint32_t)Default_Handler, /* PendSV */
-    (uint32_t)SysTick_Handler, /* SysTick */
+    (uint32_t)Default_Handler,   /* PendSV */
+    (uint32_t)SysTick_Handler,   /* SysTick */
 };
