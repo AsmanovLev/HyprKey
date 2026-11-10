@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:padding="14dp"
+    android:background="#101216">
+
+    <!-- Header -->
+    <TextView
+        android:id="@+id/tv_title"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="HyprKey FIDO2 / U2F Debugger"
+        android:textColor="#00E676"
+        android:textSize="20sp"
+        android:textStyle="bold"
+        android:gravity="center"
+        android:paddingBottom="8dp" />
+
+    <!-- Status Card -->
+    <LinearLayout
+        android:id="@+id/card_status"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:background="#1A222D"
+        android:padding="12dp"
+        android:layout_marginBottom="10dp">
+
+        <TextView
+            android:id="@+id/tv_badge"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="READER MODE: ACTIVE"
+            android:textColor="#00E5FF"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:gravity="center" />
+
+        <TextView
+            android:id="@+id/tv_status_details"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Waiting for PN532 target emulation...\nBring phone antenna to PN532."
+            android:textColor="#ECEFF1"
+            android:textSize="13sp"
+            android:gravity="center"
+            android:paddingTop="4dp" />
+    </LinearLayout>
+
+    <!-- Diagnostics Log -->
+    <ScrollView
+        android:id="@+id/scroll_log"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:background="#0A0C0E"
+        android:padding="8dp">
+
+        <TextView
+            android:id="@+id/tv_log"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:fontFamily="monospace"
+            android:textColor="#CFD8DC"
+            android:textSize="12sp"
+            android:text="[Ready] Listening on NFC Reader Mode (flags: 0x8F)...\n" />
+    </ScrollView>
+
+    <!-- Action Bar -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:layout_marginTop="8dp">
+
+        <Button
+            android:id="@+id/btn_clear"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:text="Clear Log"
+            android:textSize="13sp" />
+    </LinearLayout>
+</LinearLayout>

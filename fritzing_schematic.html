@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Точная Fritzing Схема HW-954 — hyprkey</title>
+<style>
+  :root {
+    --bg-color: #1e1e1e;
+    --canvas-bg: #ecece6;
+    --card-bg: #2d2d2d;
+    --text-color: #f5f5f5;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
+  body {
+    background-color: var(--bg-color);
+    color: var(--text-color);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 20px;
+    min-height: 100vh;
+  }
+  header { text-align: center; margin-bottom: 16px; }
+  h1 { font-size: 24px; color: #4fc3f7; display: flex; align-items: center; justify-content: center; gap: 10px; }
+  .tag { background: #10b981; color: white; font-size: 11px; padding: 3px 8px; border-radius: 4px; font-weight: bold; text-transform: uppercase; }
+  p.desc { color: #aaa; font-size: 14px; margin-top: 6px; }
+  .canvas-wrapper {
+    background: var(--canvas-bg);
+    border-radius: 8px;
+    box-shadow: 0 10px 35px rgba(0,0,0,0.65);
+    position: relative;
+    border: 3px solid #111;
+  }
+  svg { display: block; }
+  .controls-bar {
+    margin-top: 16px;
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+    justify-content: center;
+    background: var(--card-bg);
+    padding: 12px 20px;
+    border-radius: 8px;
+    max-width: 1120px;
+    width: 100%;
+  }
+  .btn {
+    background: #3e3e3e;
+    color: white;
+    border: 1px solid #555;
+    padding: 7px 16px;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 500;
+    transition: all 0.2s;
+  }
+  .btn:hover, .btn.active { background: #0284c7; border-color: #38bdf8; }
+  .details-panel {
+    margin-top: 16px;
+    background: var(--card-bg);
+    border-radius: 8px;
+    padding: 18px 24px;
+    max-width: 1120px;
+    width: 100%;
+    font-size: 14px;
+    line-height: 1.6;
+    border-left: 4px solid #10b981;
+  }
+  .wire-highlight {
+    cursor: pointer;
+    transition: stroke-width 0.2s, filter 0.2s;
+  }
+  .wire-highlight:hover {
+    stroke-width: 7 !important;
+    filter: drop-shadow(0 0 6px white);
+  }
+  .tooltip {
+    position: absolute;
+    background: rgba(15, 23, 42, 0.95);
+    color: #fff;
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-size: 12px;
+    pointer-events: none;
+    display: none;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+    border: 1px solid #38bdf8;
+    z-index: 100;
+    font-weight: 500;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Fritzing View: nRF52840 HW-954 SuperMini <span class="tag">Точная распиновка</span></h1>
+  <p class="desc">Точное соответствие шелкографии и аппаратных шин контроллера с исправленной сеткой NFC PN532</p>
+</header>
+
+<div class="canvas-wrapper">
+  <div id="tooltip" class="tooltip"></div>
+  <svg width="1120" height="820" viewBox="0 0 1120 820" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <filter id="pcb-shadow" x="-5%" y="-5%" width="110%" height="110%">
+        <feDropShadow dx="3" dy="6" stdDeviation="5" flood-color="#000000" flood-opacity="0.5"/>
+      </filter>
+      <filter id="wire-shadow" x="-10%" y="-10%" width="120%" height="120%">
+        <feDropShadow dx="2" dy="4" stdDeviation="3" flood-color="#000000" flood-opacity="0.35"/>
+      </filter>
+
+      <linearGradient id="metal-bezel" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stop-color="#f5f5f5"/>
+        <stop offset="30%" stop-color="#b8b8b8"/>
+        <stop offset="70%" stop-color="#e0e0e0"/>
+        <stop offset="100%" stop-color="#8a8a8a"/>
+      </linearGradient>
+
+      <radialGradient id="sensor-glass" cx="50%" cy="50%" r="50%">
+        <stop offset="0%" stop-color="#2a3b4c"/>
+        <stop offset="75%" stop-color="#141a22"/>
+        <stop offset="100%" stop-color="#0b0e13"/>
+      </radialGradient>
+
+      <linearGradient id="usb-metal" x1="0%" y1="0%" x2="100%" y2="0%">
+        <stop offset="0%" stop-color="#999"/>
+        <stop offset="25%" stop-color="#eee"/>
+        <stop offset="75%" stop-color="#bbb"/>
+        <stop offset="100%" stop-color="#777"/>
+      </linearGradient>
+
+      <linearGradient id="gold-pin" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stop-color="#ffe082"/>
+        <stop offset="100%" stop-color="#ffb300"/>
+      </linearGradient>
+
+      <!-- Gold Plated Through-Hole -->
+      <g id="hole">
+        <circle cx="0" cy="0" r="7.5" fill="url(#gold-pin)" stroke="#b28704" stroke-width="0.8"/>
+        <circle cx="0" cy="0" r="4.2" fill="#1b1c1d"/>
+      </g>
+      <g id="solder-pad">
+        <circle cx="0" cy="0" r="6" fill="url(#gold-pin)" stroke="#b28704" stroke-width="0.5"/>
+        <circle cx="0" cy="0" r="2.8" fill="#555"/>
+      </g>
+
+      <!-- Label Chips -->
+      <!-- P-Port label (Yellow-ish gold) -->
+      <g id="lbl-port"><rect x="-24" y="-8" width="48" height="16" rx="3" fill="#b45309"/><text x="0" y="3.5" fill="#fef3c7" font-size="8.5" font-weight="bold" text-anchor="middle">GPIO</text></g>
+    </defs>
+
+    <!-- Fritzing Grid Dots -->
+    <pattern id="grid-dots" width="25" height="25" patternUnits="userSpaceOnUse">
+      <circle cx="12.5" cy="12.5" r="1.3" fill="#c4c4bc"/>
+    </pattern>
+    <rect width="1120" height="820" fill="url(#grid-dots)"/>
+
+    <!-- =================================================================== -->
+    <!-- COMPONENT 1: R558S Fingerprint Sensor (Top Left)                   -->
+    <!-- =================================================================== -->
+    <g transform="translate(60, 80)" filter="url(#pcb-shadow)">
+      <circle cx="105" cy="105" r="82" fill="url(#metal-bezel)" stroke="#777" stroke-width="1.5"/>
+      <circle cx="105" cy="105" r="71" fill="none" stroke="#10b981" stroke-width="4" opacity="0.85" filter="drop-shadow(0 0 4px #10b981)"/>
+      <circle cx="105" cy="105" r="67" fill="url(#sensor-glass)"/>
+      <circle cx="105" cy="105" r="48" fill="none" stroke="#253545" stroke-dasharray="3,3" stroke-width="1"/>
+      <text x="105" y="105" fill="#38bdf8" font-size="11" font-weight="bold" text-anchor="middle">GROW R558S</text>
+      <text x="105" y="122" fill="#94a3b8" font-size="9" text-anchor="middle">Capacitive Biometrics</text>
+
+      <!-- Cable Exit -->
+      <path d="M 105 187 L 105 240" stroke="#111" stroke-width="18" stroke-linecap="round"/>
+      <g transform="translate(60, 235)">
+        <rect x="0" y="0" width="90" height="25" rx="4" fill="#f8fafc" stroke="#94a3b8"/>
+        <text x="45" y="15" fill="#0f172a" font-size="9" font-weight="bold" text-anchor="middle">JST-1.0 (6P)</text>
+        <!-- 6 Wires -->
+        <circle cx="12" cy="25" r="4" fill="#ef4444" id="r-vcc"/>
+        <circle cx="25" cy="25" r="4" fill="#1e293b" id="r-gnd"/>
+        <circle cx="38" cy="25" r="4" fill="#eab308" id="r-tx"/>
+        <circle cx="51" cy="25" r="4" fill="#22c55e" id="r-rx"/>
+        <circle cx="64" cy="25" r="4" fill="#3b82f6" id="r-wake"/>
+        <circle cx="77" cy="25" r="4" fill="#f8fafc" stroke="#94a3b8" id="r-vt"/>
+      </g>
+    </g>
+
+
+    <!-- =================================================================== -->
+    <!-- COMPONENT 2: SuperMini nRF52840 (HW-954) EXACT LAYOUT (Center)     -->
+    <!-- =================================================================== -->
+    <g transform="translate(430, 40)" filter="url(#pcb-shadow)">
+      <!-- Board Substrate -->
+      <rect x="0" y="0" width="210" height="490" rx="14" fill="#141517" stroke="#2b2d30" stroke-width="1.5"/>
+      <rect x="3" y="3" width="204" height="484" rx="11" fill="none" stroke="#25272a" stroke-width="1"/>
+
+      <!-- USB-C Receptacle -->
+      <rect x="68" y="-12" width="74" height="30" rx="6" fill="url(#usb-metal)" stroke="#64748b" stroke-width="1.2"/>
+      <rect x="80" y="-9" width="50" height="10" rx="3" fill="#0f172a"/>
+
+      <!-- Board Silkscreen Top -->
+      <text x="105" y="44" fill="#f1f5f9" font-size="12" font-weight="bold" text-anchor="middle" letter-spacing="1">HW-954</text>
+      <text x="105" y="58" fill="#64748b" font-size="8.5" text-anchor="middle">nRF52840 SuperMini</text>
+
+      <!-- Nordic SoC IC (QFN-73 at 45 degree angle like on real board!) -->
+      <g transform="translate(105, 235) rotate(45)">
+        <rect x="-35" y="-35" width="70" height="70" rx="4" fill="#0a0a0a" stroke="#262626" stroke-width="1.5"/>
+        <circle cx="-27" cy="-27" r="2.5" fill="#525252"/>
+        <text x="0" y="-8" fill="#737373" font-size="7.5" font-weight="bold" text-anchor="middle">NORDIC</text>
+        <text x="0" y="4" fill="#a3a3a3" font-size="7" text-anchor="middle">nRF52840</text>
+        <text x="0" y="16" fill="#525252" font-size="6" text-anchor="middle">QIAAC0</text>
+      </g>
+
+      <!-- Crystal 32.768 kHz -->
+      <rect x="35" y="145" width="20" height="32" rx="3" fill="#cbd5e1" stroke="#94a3b8"/>
+      <!-- LED: P0.15 RED (Pin LED) -->
+      <rect x="156" y="105" width="7" height="12" rx="1.5" fill="#dc2626" stroke="#ef4444"/>
+      <text x="160" y="98" fill="#f87171" font-size="7" font-weight="bold" text-anchor="middle">P0.15 (LED)</text>
+
+      <!-- Reset Push Button -->
+      <rect x="94" y="125" width="22" height="16" rx="2" fill="#e2e8f0" stroke="#94a3b8"/>
+      <circle cx="105" cy="133" r="4.5" fill="#dc2626"/>
+
+      <!-- Bottom Ceramic/BLE Antenna -->
+      <rect x="75" y="450" width="60" height="24" rx="3" fill="#166534" stroke="#14532d"/>
+      <path d="M 85 462 L 125 462 M 95 456 L 95 468 M 105 456 L 105 468 M 115 456 L 115 468" stroke="#86efac" stroke-width="1.5"/>
+
+      <!-- Center Bottom Extra Pads: 101, 102, 107 -->
+      <g transform="translate(73, 420)">
+        <use href="#solder-pad" x="0" y="0"/>
+        <text x="0" y="16" fill="#fbbf24" font-size="8" font-weight="bold" text-anchor="middle">101</text>
+        <use href="#solder-pad" x="32" y="0"/>
+        <text x="32" y="16" fill="#fbbf24" font-size="8" font-weight="bold" text-anchor="middle">102</text>
+        <use href="#solder-pad" x="64" y="0"/>
+        <text x="64" y="16" fill="#fbbf24" font-size="8" font-weight="bold" text-anchor="middle">107</text>
+      </g>
+
+      <!-- ======================================================== -->
+      <!-- LEFT PIN COLUMN (13 PINS):                               -->
+      <!-- B-, 006, 008, GND, GND, 017, 020, 022, 024, 100, 011, 104, 106 -->
+      <!-- ======================================================== -->
+      <!-- 1: B- (GND) -->
+      <g transform="translate(18, 55)" id="p_l_bminus"><use href="#hole"/><text x="16" y="4" fill="#94a3b8" font-size="9" font-weight="bold">B-</text></g>
+      <!-- 2: 006 (P0.06 / D0 / TX) -->
+      <g transform="translate(18, 86)" id="p_l_006"><use href="#hole"/><text x="16" y="4" fill="#38bdf8" font-size="10" font-weight="bold">006</text></g>
+      <!-- 3: 008 (P0.08 / D1 / RX) -->
+      <g transform="translate(18, 117)" id="p_l_008"><use href="#hole"/><text x="16" y="4" fill="#4ade80" font-size="10" font-weight="bold">008</text></g>
+      <!-- 4: GND -->
+      <g transform="translate(18, 148)" id="p_l_gnd1"><use href="#hole"/><text x="16" y="4" fill="#94a3b8" font-size="9" font-weight="bold">GND</text></g>
+      <!-- 5: GND -->
+      <g transform="translate(18, 179)" id="p_l_gnd2"><use href="#hole"/><text x="16" y="4" fill="#94a3b8" font-size="9" font-weight="bold">GND</text></g>
+      <!-- 6: 017 (P0.17 / D2 / SCK) -->
+      <g transform="translate(18, 210)" id="p_l_017"><use href="#hole"/><text x="16" y="4" fill="#60a5fa" font-size="10" font-weight="bold">017</text></g>
+      <!-- 7: 020 (P0.20 / D3 / MISO) -->
+      <g transform="translate(18, 241)" id="p_l_020"><use href="#hole"/><text x="16" y="4" fill="#2dd4bf" font-size="10" font-weight="bold">020</text></g>
+      <!-- 8: 022 (P0.22 / D4 / MOSI) -->
+      <g transform="translate(18, 272)" id="p_l_022"><use href="#hole"/><text x="16" y="4" fill="#f472b6" font-size="10" font-weight="bold">022</text></g>
+      <!-- 9: 024 (P0.24 / D5 / CS) -->
+      <g transform="translate(18, 303)" id="p_l_024"><use href="#hole"/><text x="16" y="4" fill="#c084fc" font-size="10" font-weight="bold">024</text></g>
+      <!-- 10: 100 (P1.00 / D6 / SDA) -->
+      <g transform="translate(18, 334)" id="p_l_100"><use href="#hole"/><text x="16" y="4" fill="#cbd5e1" font-size="10" font-weight="bold">100</text></g>
+      <!-- 11: 011 (P0.11 / D7 / SCL / FP_WAKE) -->
+      <g transform="translate(18, 365)" id="p_l_011"><use href="#hole"/><text x="16" y="4" fill="#fde047" font-size="10" font-weight="bold">011</text></g>
+      <!-- 12: 104 (P1.04 / D8 / NFC_IRQ) -->
+      <g transform="translate(18, 396)" id="p_l_104"><use href="#hole"/><text x="16" y="4" fill="#fb923c" font-size="10" font-weight="bold">104</text></g>
+      <!-- 13: 106 (P1.06 / D9 / NFC_RST) -->
+      <g transform="translate(18, 427)" id="p_l_106"><use href="#hole"/><text x="16" y="4" fill="#e879f9" font-size="10" font-weight="bold">106</text></g>
+
+      <!-- ======================================================== -->
+      <!-- RIGHT PIN COLUMN (13 PINS):                              -->
+      <!-- B+, RAW, GND, RST, VCC, 031, 029, 002, 115, 113, 111, 010, 009 -->
+      <!-- ======================================================== -->
+      <!-- 1: B+ (VBAT+) -->
+      <g transform="translate(192, 55)" id="p_r_bplus"><use href="#hole"/><text x="-16" y="4" fill="#ef4444" font-size="9" font-weight="bold" text-anchor="end">B+</text></g>
+      <!-- 2: RAW (VBAT+) -->
+      <g transform="translate(192, 86)" id="p_r_raw"><use href="#hole"/><text x="-16" y="4" fill="#ef4444" font-size="9" font-weight="bold" text-anchor="end">RAW</text></g>
+      <!-- 3: GND -->
+      <g transform="translate(192, 117)" id="p_r_gnd3"><use href="#hole"/><text x="-16" y="4" fill="#94a3b8" font-size="9" font-weight="bold" text-anchor="end">GND</text></g>
+      <!-- 4: RST (RESET) -->
+      <g transform="translate(192, 148)" id="p_r_rst"><use href="#hole"/><text x="-16" y="4" fill="#94a3b8" font-size="9" font-weight="bold" text-anchor="end">RST</text></g>
+      <!-- 5: VCC (3V3) -->
+      <g transform="translate(192, 179)" id="p_r_vcc"><use href="#hole"/><text x="-16" y="4" fill="#ef4444" font-size="10" font-weight="bold" text-anchor="end">VCC</text></g>
+      <!-- 6: 031 (P0.31 / D17 / A2) -->
+      <g transform="translate(192, 210)"><use href="#hole"/><text x="-16" y="4" fill="#64748b" font-size="9" text-anchor="end">031</text></g>
+      <!-- 7: 029 (P0.29 / D16 / A1) -->
+      <g transform="translate(192, 241)"><use href="#hole"/><text x="-16" y="4" fill="#64748b" font-size="9" text-anchor="end">029</text></g>
+      <!-- 8: 002 (P0.02 / D15 / A0) -->
+      <g transform="translate(192, 272)"><use href="#hole"/><text x="-16" y="4" fill="#64748b" font-size="9" text-anchor="end">002</text></g>
+      <!-- 9: 115 (P1.15 / D14 / SCL1) -->
+      <g transform="translate(192, 303)"><use href="#hole"/><text x="-16" y="4" fill="#64748b" font-size="9" text-anchor="end">115</text></g>
+      <!-- 10: 113 (P1.13 / D13 / SDA1) -->
+      <g transform="translate(192, 334)"><use href="#hole"/><text x="-16" y="4" fill="#64748b" font-size="9" text-anchor="end">113</text></g>
+      <!-- 11: 111 (P1.11 / D12) -->
+      <g transform="translate(192, 365)"><use href="#hole"/><text x="-16" y="4" fill="#64748b" font-size="9" text-anchor="end">111</text></g>
+      <!-- 12: 010 (P0.10 / D11 / NFC2) -->
+      <g transform="translate(192, 396)"><use href="#hole"/><text x="-16" y="4" fill="#64748b" font-size="9" text-anchor="end">010</text></g>
+      <!-- 13: 009 (P0.09 / D10 / NFC1) -->
+      <g transform="translate(192, 427)"><use href="#hole"/><text x="-16" y="4" fill="#64748b" font-size="9" text-anchor="end">009</text></g>
+    </g>
+
+
+    <!-- =================================================================== -->
+    <!-- COMPONENT 3: PN532 NFC Module (Right Side, Correct 2.54mm pitch)    -->
+    <!-- =================================================================== -->
+    <g transform="translate(800, 70)" filter="url(#pcb-shadow)">
+      <!-- Board Body -->
+      <rect x="0" y="0" width="240" height="420" rx="10" fill="#991b1b" stroke="#dc2626" stroke-width="1.5"/>
+      <rect x="3" y="3" width="234" height="414" rx="8" fill="none" stroke="#f87171" stroke-width="0.7" opacity="0.6"/>
+
+      <!-- Integrated PCB Loop Antenna (Top Half) -->
+      <rect x="15" y="15" width="210" height="170" rx="6" fill="#7f1d1d" stroke="#991b1b"/>
+      <rect x="23" y="23" width="194" height="154" rx="4" fill="none" stroke="#eab308" stroke-width="2.5"/>
+      <rect x="30" y="30" width="180" height="140" rx="3" fill="none" stroke="#eab308" stroke-width="2.5"/>
+      <rect x="37" y="37" width="166" height="126" rx="2" fill="none" stroke="#eab308" stroke-width="2"/>
+      <text x="120" y="105" fill="#fef08a" font-size="13" font-weight="bold" text-anchor="middle" letter-spacing="1">NFC ANTENNA</text>
+      <text x="120" y="122" fill="#fde047" font-size="10" text-anchor="middle">13.56 MHz RFID/NFC</text>
+
+      <text x="120" y="205" fill="#f8fafc" font-size="13" font-weight="bold" text-anchor="middle">PN532 NFC V3</text>
+
+      <!-- PN532 IC -->
+      <rect x="95" y="220" width="50" height="50" rx="3" fill="#0f172a" stroke="#334155"/>
+      <text x="120" y="247" fill="#94a3b8" font-size="8" font-weight="bold" text-anchor="middle">NXP</text>
+      <text x="120" y="259" fill="#f8fafc" font-size="8" text-anchor="middle">PN532</text>
+
+      <!-- DIP Switches (SPI Mode: 0 0) -->
+      <rect x="25" y="230" width="40" height="34" rx="3" fill="#1e3a8a" stroke="#1d4ed8"/>
+      <rect x="30" y="236" width="13" height="22" rx="1" fill="#fff"/>
+      <rect x="47" y="236" width="13" height="22" rx="1" fill="#fff"/>
+      <rect x="31" y="247" width="11" height="10" fill="#dc2626"/>
+      <rect x="48" y="247" width="11" height="10" fill="#dc2626"/>
+      <text x="45" y="276" fill="#fef08a" font-size="7.5" font-weight="bold" text-anchor="middle">SEL: 0 0 (SPI)</text>
+
+      <!-- 8-Pin Header at Bottom (Perfect 25px Pitch = exactly aligned!) -->
+      <!-- Width = 200, centered from x=20 to x=220. 8 pins at intervals of 25px: 32.5, 57.5, 82.5, 107.5, 132.5, 157.5, 182.5, 207.5 -->
+      <g transform="translate(0, 320)">
+        <rect x="15" y="0" width="210" height="34" rx="4" fill="#0f172a" stroke="#334155"/>
+        
+        <!-- Pin 1: SCK -->
+        <g transform="translate(30, 17)"><use href="#hole"/><text x="0" y="30" fill="#60a5fa" font-size="9.5" font-weight="bold" text-anchor="middle">SCK</text></g>
+        <!-- Pin 2: MISO -->
+        <g transform="translate(56, 17)"><use href="#hole"/><text x="0" y="30" fill="#2dd4bf" font-size="9.5" font-weight="bold" text-anchor="middle">MISO</text></g>
+        <!-- Pin 3: MOSI -->
+        <g transform="translate(82, 17)"><use href="#hole"/><text x="0" y="30" fill="#f472b6" font-size="9.5" font-weight="bold" text-anchor="middle">MOSI</text></g>
+        <!-- Pin 4: SS / CS -->
+        <g transform="translate(108, 17)"><use href="#hole"/><text x="0" y="30" fill="#c084fc" font-size="9.5" font-weight="bold" text-anchor="middle">SS</text></g>
+        <!-- Pin 5: VCC -->
+        <g transform="translate(134, 17)"><use href="#hole"/><text x="0" y="30" fill="#ef4444" font-size="9.5" font-weight="bold" text-anchor="middle">VCC</text></g>
+        <!-- Pin 6: GND -->
+        <g transform="translate(160, 17)"><use href="#hole"/><text x="0" y="30" fill="#94a3b8" font-size="9.5" font-weight="bold" text-anchor="middle">GND</text></g>
+        <!-- Pin 7: IRQ -->
+        <g transform="translate(186, 17)"><use href="#hole"/><text x="0" y="30" fill="#fb923c" font-size="9.5" font-weight="bold" text-anchor="middle">IRQ</text></g>
+        <!-- Pin 8: RST -->
+        <g transform="translate(212, 17)"><use href="#hole"/><text x="0" y="30" fill="#e879f9" font-size="9.5" font-weight="bold" text-anchor="middle">RST</text></g>
+      </g>
+    </g>
+
+
+    <!-- =================================================================== -->
+    <!-- REALISTIC FRITZING WIRES (Jumper Wires with Bend Curves & Shadow)    -->
+    <!-- All coordinates aligned to the EXACT board pin layout!             -->
+    <!-- =================================================================== -->
+    <g filter="url(#wire-shadow)" id="wires-layer">
+
+      <!-- ================= R558S WIRES (LEFT MODULE) ================= -->
+      <!-- 1. VCC (Red): R558S Pin 1 (x=132, y=340) -> HW-954 VCC Pin (Right col pin 5: x=622, y=219) -->
+      <path class="wire-highlight" d="M 132 340 C 130 520, 560 310, 622 219" fill="none" stroke="#ef4444" stroke-width="4.5" stroke-linecap="round" data-signal="R558S VCC (Красный) -> VCC (3.3V)"/>
+
+      <!-- 2. 3.3VT (White): R558S Pin 6 (x=197, y=340) -> HW-954 VCC (Right col pin 5: x=622, y=219) -->
+      <path class="wire-highlight" d="M 197 340 C 230 540, 580 340, 622 219" fill="none" stroke="#f8fafc" stroke-width="4.5" stroke-linecap="round" data-signal="R558S 3.3VT (Белый) -> VCC (3.3V) Touch Power"/>
+
+      <!-- 3. GND (Black): R558S Pin 2 (x=145, y=340) -> HW-954 GND (Left col pin 4: x=448, y=188) -->
+      <path class="wire-highlight" d="M 145 340 C 160 210, 360 180, 448 188" fill="none" stroke="#1e293b" stroke-width="5" stroke-linecap="round" data-signal="R558S GND (Черный) -> HW-954 GND"/>
+
+      <!-- 4. TXD (Yellow): R558S Pin 3 (x=158, y=340) -> HW-954 008 / RX (Left col pin 3: x=448, y=157) -->
+      <path class="wire-highlight" d="M 158 340 C 180 150, 340 145, 448 157" fill="none" stroke="#eab308" stroke-width="4.5" stroke-linecap="round" data-signal="R558S TXD (Желтый) -> HW-954 Pin 008 (P0.08 / UART RX)"/>
+
+      <!-- 5. RXD (Green): R558S Pin 4 (x=171, y=340) -> HW-954 006 / TX (Left col pin 2: x=448, y=126) -->
+      <path class="wire-highlight" d="M 171 340 C 200 110, 340 115, 448 126" fill="none" stroke="#22c55e" stroke-width="4.5" stroke-linecap="round" data-signal="R558S RXD (Зеленый) <- HW-954 Pin 006 (P0.06 / UART TX)"/>
+
+      <!-- 6. WAKE (Blue): R558S Pin 5 (x=184, y=340) -> HW-954 011 / FP_WAKE (Left col pin 11: x=448, y=405) -->
+      <path class="wire-highlight" d="M 184 340 C 220 440, 350 415, 448 405" fill="none" stroke="#3b82f6" stroke-width="4.5" stroke-linecap="round" data-signal="R558S WAKE (Синий) -> HW-954 Pin 011 (P0.11 / Пробуждение по касанию)"/>
+
+
+      <!-- ================= PN532 WIRES (RIGHT MODULE) ================= -->
+      <!-- Hardware SPI on HW-954 Left Row:                               -->
+      <!-- 017 = SCK, 020 = MISO, 022 = MOSI, 024 = CS                   -->
+      <!-- 104 = NFC_IRQ, 106 = NFC_RST                                   -->
+
+      <!-- 7. SCK (Blue): PN532 SCK (x=830, y=407) -> HW-954 017 (Left col pin 6: x=448, y=250) -->
+      <path class="wire-highlight" d="M 830 407 C 760 560, 520 280, 448 250" fill="none" stroke="#60a5fa" stroke-width="4.5" stroke-linecap="round" data-signal="PN532 SCK -> HW-954 Pin 017 (P0.17 / Hardware SPI SCK)"/>
+
+      <!-- 8. MISO (Teal): PN532 MISO (x=856, y=407) -> HW-954 020 (Left col pin 7: x=448, y=281) -->
+      <path class="wire-highlight" d="M 856 407 C 780 590, 530 310, 448 281" fill="none" stroke="#2dd4bf" stroke-width="4.5" stroke-linecap="round" data-signal="PN532 MISO -> HW-954 Pin 020 (P0.20 / Hardware SPI MISO)"/>
+
+      <!-- 9. MOSI (Pink): PN532 MOSI (x=882, y=407) -> HW-954 022 (Left col pin 8: x=448, y=312) -->
+      <path class="wire-highlight" d="M 882 407 C 800 620, 540 340, 448 312" fill="none" stroke="#f472b6" stroke-width="4.5" stroke-linecap="round" data-signal="PN532 MOSI <- HW-954 Pin 022 (P0.22 / Hardware SPI MOSI)"/>
+
+      <!-- 10. SS / CS (Purple): PN532 SS (x=908, y=407) -> HW-954 024 (Left col pin 9: x=448, y=343) -->
+      <path class="wire-highlight" d="M 908 407 C 820 650, 550 370, 448 343" fill="none" stroke="#c084fc" stroke-width="4.5" stroke-linecap="round" data-signal="PN532 SS / CS -> HW-954 Pin 024 (P0.24 / Hardware SPI CS)"/>
+
+      <!-- 11. VCC (Red): PN532 VCC (x=934, y=407) -> HW-954 VCC (Right col pin 5: x=622, y=219) -->
+      <path class="wire-highlight" d="M 934 407 C 910 260, 720 190, 622 219" fill="none" stroke="#ef4444" stroke-width="4.5" stroke-linecap="round" data-signal="PN532 VCC -> HW-954 VCC (3.3V)"/>
+
+      <!-- 12. GND (Grey): PN532 GND (x=960, y=407) -> HW-954 GND (Right col pin 3: x=622, y=157) -->
+      <path class="wire-highlight" d="M 960 407 C 950 200, 750 140, 622 157" fill="none" stroke="#94a3b8" stroke-width="4.5" stroke-linecap="round" data-signal="PN532 GND -> HW-954 GND"/>
+
+      <!-- 13. IRQ (Orange): PN532 IRQ (x=986, y=407) -> HW-954 Pin 104 (Left col pin 12: x=448, y=436) -->
+      <path class="wire-highlight" d="M 986 407 C 960 720, 540 640, 448 436" fill="none" stroke="#fb923c" stroke-width="4" stroke-dasharray="8,4" stroke-linecap="round" data-signal="PN532 IRQ -> HW-954 Pin 104 (P1.04 / Прерывание NFC)"/>
+
+      <!-- 14. RST (Violet): PN532 RST (x=1012, y=407) -> HW-954 Pin 106 (Left col pin 13: x=448, y=467) -->
+      <path class="wire-highlight" d="M 1012 407 C 980 760, 520 680, 448 467" fill="none" stroke="#e879f9" stroke-width="4" stroke-dasharray="8,4" stroke-linecap="round" data-signal="PN532 RST -> HW-954 Pin 106 (P1.06 / Сброс NFC)"/>
+
+    </g>
+  </svg>
+</div>
+
+<div class="controls-bar">
+  <button class="btn active" onclick="filterWires('all')">Показать все цепи</button>
+  <button class="btn" onclick="filterWires('fingerprint')">Сканер R558S (UART + Touch)</button>
+  <button class="btn" onclick="filterWires('spi')">Аппаратный SPI NFC (017, 020, 022, 024)</button>
+  <button class="btn" onclick="filterWires('power')">Питание (VCC 3.3V и GND)</button>
+</div>
+
+<div class="details-panel">
+  <h3 style="color:#4fc3f7; margin-bottom:8px;">Что исправлено по вашей заводской распиновке:</h3>
+  <ul style="padding-left: 20px;">
+    <li><strong>Точное совпадение с платой:</strong> На левой стороне платы HW-954 аппаратные линии SPI расположены единым блоком: <code>017</code> (SCK), <code>020</code> (MISO), <code>022</code> (MOSI), <code>024</code> (CS). Туда и заведены линии от PN532!</li>
+    <li><strong>Пины прерываний:</strong> NFC IRQ подключен к пину <code>104</code> (P1.04), а сброс RST к <code>106</code> (P1.06). Сканер R558S Touch Wake подключен к <code>011</code> (P0.11).</li>
+    <li><strong>Исправлена сетка PN532:</strong> Все 8 пинов нижней гребенки теперь имеют шаг ровно 2.54 мм и четко отцентрованы под колодку.</li>
+  </ul>
+</div>
+
+<script>
+  const tooltip = document.getElementById('tooltip');
+  const wires = document.querySelectorAll('.wire-highlight');
+
+  wires.forEach(w => {
+    w.addEventListener('mouseenter', (e) => {
+      tooltip.innerText = w.getAttribute('data-signal');
+      tooltip.style.display = 'block';
+    });
+    w.addEventListener('mousemove', (e) => {
+      tooltip.style.left = (e.pageX + 15) + 'px';
+      tooltip.style.top = (e.pageY + 15) + 'px';
+    });
+    w.addEventListener('mouseleave', () => {
+      tooltip.style.display = 'none';
+    });
+  });
+
+  function filterWires(category) {
+    document.querySelectorAll('.btn').forEach(b => b.classList.remove('active'));
+    event.target.classList.add('active');
+
+    wires.forEach(w => {
+      const sig = w.getAttribute('data-signal');
+      if (category === 'all') {
+        w.style.opacity = '1';
+        w.style.strokeWidth = w.getAttribute('stroke-dasharray') ? '4' : '4.5';
+      } else if (category === 'fingerprint') {
+        w.style.opacity = sig.includes('R558S') ? '1' : '0.08';
+      } else if (category === 'spi') {
+        w.style.opacity = sig.includes('PN532') && !sig.includes('VCC') && !sig.includes('GND') ? '1' : '0.08';
+      } else if (category === 'power') {
+        w.style.opacity = (sig.includes('VCC') || sig.includes('GND')) ? '1' : '0.08';
+      }
+    });
+  }
+</script>
+
+</body>
+</html>

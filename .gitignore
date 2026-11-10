@@ -1,0 +1,54 @@
+# Compiled firmware & binary artifacts
+*.bin
+*.elf
+*.hex
+*.uf2
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.dylib
+*.dll
+*.exe
+
+# Build directories
+build/
+bin/
+obj/
+out/
+dist/
+
+# Android build outputs & keys
+*.apk
+*.aab
+*.idsig
+*.dex
+*.class
+res.zip
+debug.keystore
+
+# Temporary debug logs & screen dumps
+*.log
+*_dump.txt
+*_logcat.txt
+*_log.txt
+nfc_dump.txt
+gms_dump.txt
+gms_perms.txt
+ch340_log.bin
+*.png
+
+# Python cache & virtual environments
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Editor & OS metadata
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+Thumbs.db

@@ -1,0 +1,1464 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HyprKey Hardware Wiring Schematic & Pinout Explorer</title>
+  <style>
+    :root {
+      --bg-primary: #0b0f19;
+      --bg-secondary: #111827;
+      --bg-card: #1e293b;
+      --border-color: #334155;
+      --text-main: #f1f5f9;
+      --text-muted: #94a3b8;
+      --accent: #38bdf8;
+      --accent-glow: rgba(56, 189, 248, 0.25);
+      
+      /* Wire Colors */
+      --wire-vcc: #ef4444;
+      --wire-gnd: #475569;
+      --wire-tx: #f59e0b;
+      --wire-rx: #10b981;
+      --wire-wake: #06b6d4;
+      --wire-vt: #8b5cf6;
+      --wire-sck: #3b82f6;
+      --wire-mosi: #f97316;
+      --wire-miso: #84cc16;
+      --wire-cs: #ec4899;
+      --wire-irq: #a855f7;
+      --wire-rst: #64748b;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Fira Code", monospace;
+    }
+
+    body {
+      background-color: var(--bg-primary);
+      color: var(--text-main);
+      overflow-x: hidden;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    header {
+      background: linear-gradient(180deg, #162033 0%, var(--bg-secondary) 100%);
+      border-bottom: 1px solid var(--border-color);
+      padding: 18px 28px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 16px;
+    }
+
+    .brand-title {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .badge-icon {
+      background: linear-gradient(135deg, #0284c7, #6366f1);
+      width: 38px;
+      height: 38px;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 20px;
+      box-shadow: 0 4px 12px rgba(2, 132, 199, 0.4);
+    }
+
+    h1 {
+      font-size: 1.35rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+
+    .subtitle {
+      font-size: 0.82rem;
+      color: var(--text-muted);
+    }
+
+    .quick-actions {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+
+    button {
+      background-color: var(--bg-card);
+      color: var(--text-main);
+      border: 1px solid var(--border-color);
+      padding: 8px 14px;
+      border-radius: 8px;
+      font-size: 0.85rem;
+      font-weight: 500;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    button:hover {
+      background-color: #334155;
+      border-color: #475569;
+      transform: translateY(-1px);
+    }
+
+    button.active {
+      background-color: #0284c7;
+      border-color: #38bdf8;
+      box-shadow: 0 0 12px rgba(56, 189, 248, 0.4);
+    }
+
+    .btn-sim {
+      background: linear-gradient(135deg, #4f46e5, #7c3aed);
+      border-color: #818cf8;
+    }
+
+    .btn-sim:hover {
+      background: linear-gradient(135deg, #4338ca, #6d28d9);
+      box-shadow: 0 0 16px rgba(124, 58, 237, 0.4);
+    }
+
+    /* Main Workspace */
+    .workspace {
+      display: grid;
+      grid-template-columns: 1fr 380px;
+      flex: 1;
+      overflow: hidden;
+      min-height: calc(100vh - 80px);
+    }
+
+    @media (max-width: 1100px) {
+      .workspace {
+        grid-template-columns: 1fr;
+        overflow: visible;
+      }
+    }
+
+    .schematic-viewport {
+      position: relative;
+      background: radial-gradient(circle at center, #131b2e 0%, var(--bg-primary) 100%);
+      display: flex;
+      flex-direction: column;
+      border-right: 1px solid var(--border-color);
+      overflow: hidden;
+    }
+
+    .filter-bar {
+      padding: 12px 20px;
+      background: rgba(17, 24, 39, 0.85);
+      backdrop-filter: blur(8px);
+      border-bottom: 1px solid var(--border-color);
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      z-index: 10;
+    }
+
+    .filter-btn {
+      font-size: 0.76rem;
+      padding: 5px 10px;
+      border-radius: 6px;
+    }
+
+    .svg-container {
+      flex: 1;
+      width: 100%;
+      height: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 10px;
+      overflow: auto;
+    }
+
+    svg {
+      width: 100%;
+      max-width: 1100px;
+      height: auto;
+      filter: drop-shadow(0 15px 25px rgba(0, 0, 0, 0.6));
+    }
+
+    /* SVG Elements Styling */
+    .wire {
+      fill: none;
+      stroke-width: 3.5;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      transition: stroke-width 0.25s, opacity 0.3s, filter 0.25s;
+      cursor: pointer;
+    }
+
+    .wire-hitbox {
+      fill: none;
+      stroke: transparent;
+      stroke-width: 18;
+      cursor: pointer;
+    }
+
+    .wire.dimmed {
+      opacity: 0.12 !important;
+      stroke-width: 2 !important;
+    }
+
+    .wire.highlighted {
+      stroke-width: 6 !important;
+      filter: drop-shadow(0 0 8px currentColor);
+      z-index: 50;
+    }
+
+    .wire-pulse {
+      stroke-dasharray: 8, 12;
+      animation: dash 1.5s linear infinite;
+    }
+
+    @keyframes dash {
+      to {
+        stroke-dashoffset: -40;
+      }
+    }
+
+    .pin-circle {
+      cursor: pointer;
+      transition: transform 0.2s, stroke-width 0.2s, r 0.2s;
+    }
+
+    .pin-circle:hover {
+      r: 6.5;
+      stroke: #38bdf8;
+      stroke-width: 3;
+    }
+
+    .pin-label {
+      font-size: 10px;
+      font-weight: 600;
+      fill: #cbd5e1;
+      pointer-events: none;
+    }
+
+    /* Sidebar info panel */
+    .sidebar {
+      background-color: var(--bg-secondary);
+      display: flex;
+      flex-direction: column;
+      overflow-y: auto;
+      max-height: calc(100vh - 80px);
+    }
+
+    .sidebar-tabs {
+      display: flex;
+      border-bottom: 1px solid var(--border-color);
+      background-color: #0d131f;
+    }
+
+    .tab-btn {
+      flex: 1;
+      padding: 12px 8px;
+      text-align: center;
+      background: none;
+      border: none;
+      border-radius: 0;
+      border-bottom: 2px solid transparent;
+      font-size: 0.8rem;
+      color: var(--text-muted);
+    }
+
+    .tab-btn.active {
+      color: var(--accent);
+      border-bottom-color: var(--accent);
+      background: rgba(56, 189, 248, 0.05);
+    }
+
+    .tab-content {
+      padding: 20px;
+      display: none;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .tab-content.active {
+      display: flex;
+    }
+
+    .info-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: 10px;
+      padding: 16px;
+    }
+
+    .info-card h3 {
+      font-size: 0.95rem;
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: #38bdf8;
+    }
+
+    .pin-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 0;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+      font-size: 0.82rem;
+    }
+
+    .pin-row:last-child {
+      border-bottom: none;
+    }
+
+    .pill {
+      font-size: 0.7rem;
+      padding: 2px 7px;
+      border-radius: 4px;
+      font-weight: 600;
+      letter-spacing: 0.03em;
+    }
+
+    .pill-red { background: rgba(239, 68, 68, 0.2); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.4); }
+    .pill-green { background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4); }
+    .pill-blue { background: rgba(59, 130, 246, 0.2); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.4); }
+    .pill-yellow { background: rgba(245, 158, 11, 0.2); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.4); }
+    .pill-purple { background: rgba(168, 85, 247, 0.2); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.4); }
+
+    .sandwich-layer {
+      position: relative;
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      padding: 12px;
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      transition: all 0.2s;
+    }
+
+    .sandwich-layer:hover {
+      border-color: #38bdf8;
+      background: #243247;
+      transform: translateX(4px);
+    }
+
+    .sandwich-layer-num {
+      width: 24px;
+      height: 24px;
+      background: #0f172a;
+      border: 1px solid #475569;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.75rem;
+      font-weight: 700;
+      color: #94a3b8;
+    }
+
+    /* Simulation status notification banner */
+    .sim-banner {
+      display: none;
+      padding: 10px 14px;
+      border-radius: 8px;
+      font-size: 0.82rem;
+      align-items: center;
+      gap: 8px;
+      animation: fadeIn 0.3s ease-out;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(-5px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    .sim-banner.active {
+      display: flex;
+    }
+
+    .sim-fingerprint {
+      background: rgba(6, 182, 212, 0.15);
+      border: 1px solid #06b6d4;
+      color: #67e8f9;
+    }
+
+    .sim-nfc {
+      background: rgba(168, 85, 247, 0.15);
+      border: 1px solid #a855f7;
+      color: #d8b4fe;
+    }
+
+    .live-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background-color: currentColor;
+      box-shadow: 0 0 8px currentColor;
+      animation: pulse 1s infinite alternate;
+    }
+
+    @keyframes pulse {
+      from { transform: scale(0.8); opacity: 0.6; }
+      to { transform: scale(1.2); opacity: 1; }
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <div class="brand-title">
+      <div class="badge-icon">⚡</div>
+      <div>
+        <h1>HyprKey Visual Hardware Wiring Schematic</h1>
+        <div class="subtitle">nRF52840 SuperMini (HW-954) &bull; R558S Capacitive Fingerprint &bull; PN532 NFC (SPI Mode)</div>
+      </div>
+    </div>
+    <div class="quick-actions">
+      <button class="btn-sim" id="btnTouchSim" onclick="simulateTouch()">
+        <span>👆</span> Simulate Finger Touch
+      </button>
+      <button class="btn-sim" id="btnNfcSim" onclick="simulateNfc()">
+        <span>💳</span> Simulate NFC Tap
+      </button>
+      <button onclick="window.print()">
+        <span>🖨️</span> Print / PDF
+      </button>
+    </div>
+  </header>
+
+  <div class="workspace">
+    <!-- Center SVG Schematic Canvas -->
+    <div class="schematic-viewport">
+      <div class="filter-bar">
+        <span style="font-size: 0.76rem; color: var(--text-muted); align-self: center; margin-right: 4px;">Highlight Bus:</span>
+        <button class="filter-btn active" onclick="setBusFilter('all')">All Signals (12 Wires)</button>
+        <button class="filter-btn" style="border-color: var(--wire-tx);" onclick="setBusFilter('uart')">FP UART (P0.06, P0.08)</button>
+        <button class="filter-btn" style="border-color: var(--wire-wake);" onclick="setBusFilter('touch')">FP Touch Wake (P0.11)</button>
+        <button class="filter-btn" style="border-color: var(--wire-sck);" onclick="setBusFilter('spi')">PN532 SPI (4-Wire)</button>
+        <button class="filter-btn" style="border-color: var(--wire-irq);" onclick="setBusFilter('nfc_ctrl')">PN532 IRQ & RST</button>
+        <button class="filter-btn" style="border-color: var(--wire-vcc);" onclick="setBusFilter('power')">Power (+3.3V & GND)</button>
+      </div>
+
+      <div class="svg-container">
+        <svg id="schematicSvg" viewBox="0 0 1150 780" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <!-- Drop Shadow Filters -->
+            <filter id="pcbShadow" x="-10%" y="-10%" width="125%" height="125%">
+              <feDropShadow dx="0" dy="8" stdDeviation="10" flood-color="#000000" flood-opacity="0.6"/>
+            </filter>
+            <filter id="glowEffect" x="-20%" y="-20%" width="140%" height="140%">
+              <feGaussianBlur stdDeviation="4" result="blur" />
+              <feComposite in="SourceGraphic" in2="blur" operator="over" />
+            </filter>
+            
+            <!-- Metallic & Component Gradients -->
+            <linearGradient id="usbMetal" x1="0%" y1="0%" x2="100%" y2="0%">
+              <stop offset="0%" stop-color="#94a3b8" />
+              <stop offset="30%" stop-color="#f1f5f9" />
+              <stop offset="70%" stop-color="#cbd5e1" />
+              <stop offset="100%" stop-color="#64748b" />
+            </linearGradient>
+
+            <linearGradient id="fpRingGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stop-color="#ffd700" />
+              <stop offset="40%" stop-color="#ffeaa7" />
+              <stop offset="70%" stop-color="#d4af37" />
+              <stop offset="100%" stop-color="#aa7c11" />
+            </linearGradient>
+
+            <radialGradient id="fpGlass" cx="50%" cy="50%" r="50%">
+              <stop offset="0%" stop-color="#1e293b" />
+              <stop offset="85%" stop-color="#0f172a" />
+              <stop offset="100%" stop-color="#020617" />
+            </radialGradient>
+
+            <linearGradient id="nfcRedPcb" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stop-color="#991b1b" />
+              <stop offset="100%" stop-color="#7f1d1d" />
+            </linearGradient>
+          </defs>
+
+          <!-- Grid Background (Engineering Grid) -->
+          <pattern id="grid" width="20" height="20" patternUnits="userSpaceOnUse">
+            <path d="M 20 0 L 0 0 0 20" fill="none" stroke="rgba(255, 255, 255, 0.03)" stroke-width="1"/>
+          </pattern>
+          <rect width="100%" height="100%" fill="url(#grid)" />
+
+          <!-- ========================================== -->
+          <!-- 1. LEFT COMPONENT: R558S FINGERPRINT SENSOR -->
+          <!-- ========================================== -->
+          <g id="comp_r558s" transform="translate(60, 160)">
+            <!-- Outer Housing -->
+            <circle cx="110" cy="110" r="95" fill="#182234" stroke="#334155" stroke-width="2" filter="url(#pcbShadow)" />
+            
+            <!-- RGB Halo Ring (Dynamic Glow in Simulator) -->
+            <circle id="fpHaloRing" cx="110" cy="110" r="82" fill="none" stroke="#06b6d4" stroke-width="6" opacity="0.85" filter="url(#glowEffect)" />
+            
+            <!-- Metallic Bezel -->
+            <circle cx="110" cy="110" r="76" fill="none" stroke="url(#fpRingGrad)" stroke-width="5" />
+            
+            <!-- Capacitive Sensing Surface -->
+            <circle cx="110" cy="110" r="72" fill="url(#fpGlass)" />
+            
+            <!-- Concentric Biometric Touch Grid Lines -->
+            <circle cx="110" cy="110" r="54" fill="none" stroke="rgba(56, 189, 248, 0.2)" stroke-width="1.2" stroke-dasharray="3, 3" />
+            <circle cx="110" cy="110" r="36" fill="none" stroke="rgba(56, 189, 248, 0.25)" stroke-width="1.2" stroke-dasharray="2, 2" />
+            <circle cx="110" cy="110" r="18" fill="none" stroke="rgba(56, 189, 248, 0.3)" stroke-width="1.2" />
+
+            <!-- Sensor Label -->
+            <text x="110" y="105" text-anchor="middle" fill="#f8fafc" font-size="13" font-weight="700" letter-spacing="1">R558S</text>
+            <text x="110" y="122" text-anchor="middle" fill="#94a3b8" font-size="9" font-weight="500">CAPACITIVE SENSOR</text>
+
+            <!-- Connector Block on Bottom of R558S -->
+            <rect x="50" y="225" width="120" height="42" rx="6" fill="#0f172a" stroke="#475569" stroke-width="1.5" />
+            <text x="110" y="243" text-anchor="middle" fill="#cbd5e1" font-size="9" font-weight="600">6-PIN JST (1.0mm)</text>
+
+            <!-- 6 Pins on Connector -->
+            <!-- Pin 1: VCC (Red) -->
+            <circle id="pin_fp_vcc" cx="62" cy="256" r="4.5" fill="#ef4444" stroke="#f87171" stroke-width="1.5" class="pin-circle" onclick="inspectSignal('vcc')"/>
+            <text x="62" y="280" text-anchor="middle" fill="#ef4444" font-size="8" font-weight="700">1:VCC</text>
+
+            <!-- Pin 2: GND (Black) -->
+            <circle id="pin_fp_gnd" cx="81" cy="256" r="4.5" fill="#475569" stroke="#94a3b8" stroke-width="1.5" class="pin-circle" onclick="inspectSignal('gnd')"/>
+            <text x="81" y="280" text-anchor="middle" fill="#94a3b8" font-size="8" font-weight="700">2:GND</text>
+
+            <!-- Pin 3: TXD (Yellow) -->
+            <circle id="pin_fp_txd" cx="100" cy="256" r="4.5" fill="#f59e0b" stroke="#fde047" stroke-width="1.5" class="pin-circle" onclick="inspectSignal('fp_tx')"/>
+            <text x="100" y="280" text-anchor="middle" fill="#f59e0b" font-size="8" font-weight="700">3:TXD</text>
+
+            <!-- Pin 4: RXD (Green) -->
+            <circle id="pin_fp_rxd" cx="119" cy="256" r="4.5" fill="#10b981" stroke="#6ee7b7" stroke-width="1.5" class="pin-circle" onclick="inspectSignal('fp_rx')"/>
+            <text x="119" y="280" text-anchor="middle" fill="#10b981" font-size="8" font-weight="700">4:RXD</text>
+
+            <!-- Pin 5: TOUCH (Wake - Blue) -->
+            <circle id="pin_fp_wake" cx="138" cy="256" r="4.5" fill="#06b6d4" stroke="#67e8f9" stroke-width="1.5" class="pin-circle" onclick="inspectSignal('fp_wake')"/>
+            <text x="138" y="280" text-anchor="middle" fill="#06b6d4" font-size="8" font-weight="700">5:WAKE</text>
+
+            <!-- Pin 6: 3.3VT (White/Purple) -->
+            <circle id="pin_fp_vt" cx="157" cy="256" r="4.5" fill="#8b5cf6" stroke="#c084fc" stroke-width="1.5" class="pin-circle" onclick="inspectSignal('fp_vt')"/>
+            <text x="157" y="280" text-anchor="middle" fill="#c084fc" font-size="8" font-weight="700">6:3.3VT</text>
+          </g>
+
+          <!-- ============================================== -->
+          <!-- 2. CENTER COMPONENT: nRF52840 SuperMini (HW-954)-->
+          <!-- ============================================== -->
+          <g id="comp_supermini" transform="translate(430, 80)">
+            <!-- Main PCB Board -->
+            <rect x="0" y="0" width="290" height="580" rx="16" fill="#0f172a" stroke="#1e293b" stroke-width="2.5" filter="url(#pcbShadow)" />
+            
+            <!-- PCB Gold Border Edge / Traces -->
+            <rect x="4" y="4" width="282" height="572" rx="14" fill="none" stroke="rgba(217, 119, 6, 0.4)" stroke-width="1" />
+
+            <!-- USB-C Connector (Top Edge) -->
+            <rect x="95" y="-12" width="100" height="38" rx="8" fill="url(#usbMetal)" stroke="#334155" stroke-width="1.5" />
+            <rect x="110" y="1" width="70" height="15" rx="5" fill="#020617" />
+            <text x="145" y="12" text-anchor="middle" fill="#94a3b8" font-size="7.5" font-weight="700">USB-C</text>
+
+            <!-- nRF52840 SoC RF Shield / Chip -->
+            <rect x="75" y="160" width="140" height="150" rx="8" fill="#1e293b" stroke="#475569" stroke-width="1.5" />
+            <circle cx="87" cy="172" r="3" fill="#64748b" />
+            <text x="145" y="215" text-anchor="middle" fill="#f8fafc" font-size="13" font-weight="700" letter-spacing="1">NORDIC</text>
+            <text x="145" y="235" text-anchor="middle" fill="#38bdf8" font-size="11" font-weight="600">nRF52840</text>
+            <text x="145" y="255" text-anchor="middle" fill="#94a3b8" font-size="8.5">BLE 5.4 / USB 2.0 / NFC</text>
+            <text x="145" y="280" text-anchor="middle" fill="#64748b" font-size="8">ARM Cortex-M4F 64MHz</text>
+
+            <!-- Onboard 3.3V LDO & Reset Switch -->
+            <rect x="85" y="80" width="35" height="24" rx="3" fill="#1e293b" stroke="#334155" stroke-width="1" />
+            <text x="102" y="95" text-anchor="middle" fill="#94a3b8" font-size="6.5">3.3V LDO</text>
+
+            <rect x="170" y="80" width="35" height="24" rx="4" fill="#334155" stroke="#64748b" stroke-width="1" />
+            <circle cx="187" cy="92" r="5" fill="#dc2626" />
+            <text x="187" y="114" text-anchor="middle" fill="#94a3b8" font-size="6.5">RESET</text>
+
+            <!-- Ceramic Antenna / Trace Area (Bottom) -->
+            <rect x="70" y="490" width="150" height="40" rx="4" fill="rgba(217, 119, 6, 0.15)" stroke="rgba(217, 119, 6, 0.5)" stroke-width="1" stroke-dasharray="4, 2"/>
+            <text x="145" y="515" text-anchor="middle" fill="#d97706" font-size="9" font-weight="600">2.4GHz BLE ANTENNA</text>
+
+            <!-- Title Silk Screen on Board -->
+            <text x="145" y="360" text-anchor="middle" fill="#f1f5f9" font-size="14" font-weight="800">SuperMini</text>
+            <text x="145" y="380" text-anchor="middle" fill="#94a3b8" font-size="9.5">HW-954 / Nice!Nano v2</text>
+
+            <!-- ============================== -->
+            <!-- SuperMini LEFT HEADER (12 PINS) -->
+            <!-- ============================== -->
+            <!-- Pin 1: P0.06 (TX / D0) -->
+            <g transform="translate(18, 50)" class="mcu-pin" onclick="inspectSignal('fp_rx')">
+              <circle cx="0" cy="0" r="6" fill="#0f172a" stroke="#d97706" stroke-width="2" class="pin-circle" id="mcu_p006"/>
+              <text x="14" y="4" class="pin-label">P0.06 (TX/D0)</text>
+              <text x="-12" y="4" text-anchor="end" fill="#64748b" font-size="8">1</text>
+            </g>
+
+            <!-- Pin 2: P0.08 (RX / D1) -->
+            <g transform="translate(18, 90)" class="mcu-pin" onclick="inspectSignal('fp_tx')">
+              <circle cx="0" cy="0" r="6" fill="#0f172a" stroke="#d97706" stroke-width="2" class="pin-circle" id="mcu_p008"/>
+              <text x="14" y="4" class="pin-label">P0.08 (RX/D1)</text>
+              <text x="-12" y="4" text-anchor="end" fill="#64748b" font-size="8">2</text>
+            </g>
+
+            <!-- Pin 3: GND -->
+            <g transform="translate(18, 130)" class="mcu-pin" onclick="inspectSignal('gnd')">
+              <circle cx="0" cy="0" r="6" fill="#0f172a" stroke="#d97706" stroke-width="2" class="pin-circle" id="mcu_gnd1"/>
+              <text x="14" y="4" class="pin-label" fill="#94a3b8">GND</text>
+              <text x="-12" y="4" text-anchor="end" fill="#64748b" font-size="8">3</text>
+            </g>
+
+            <!-- Pin 4: GND -->
+            <g transform="translate(18, 170)" class="mcu-pin">
+              <circle cx="0" cy="0" r="6" fill="#0f172a" stroke="#64748b" stroke-width="1.5" class="pin-circle"/>
+              <text x="14" y="4" class="pin-label" fill="#64748b">GND</text>
+              <text x="-12" y="4" text-anchor="end" fill="#64748b" font-size="8">4</text>
+            </g>
+
+            <!-- Pin 5: P0.17 -->
+            <g transform="translate(18, 210)" class="mcu-pin">
+              <circle cx="0" cy="0" r="6" fill="#0f172a" stroke="#64748b" stroke-width="1.5" class="pin-circle"/>
+              <text x="14" y="4" class="pin-label" fill="#64748b">P0.17 (D2)</text>
+              <text x="-12" y="4" text-anchor="end" fill="#64748b" font-size="8">5</text>
+            </g>
+
+            <!-- Pin 6: P0.20 -->
+            <g transform="translate(18, 250)" class="mcu-pin">
+              <circle cx="0" cy="0" r="6" fill="#0f172a" stroke="#64748b" stroke-width="1.5" class="pin-circle"/>
+              <text x="14" y="4" class="pin-label" fill="#64748b">P0.20 (D3)</text>
+              <text x="-12" y="4" text-anchor="end" fill="#64748b" font-size="8">6</text>
+            </g>
+
+            <!-- Pin 7: P0.22 (D4 -> NFC RST) -->
+            <g transform="translate(18, 290)" class="mcu-pin" onclick="inspectSignal('nfc_rst')">
+              <circle cx="0" cy="0" r="6" fill="#0f172a" stroke="#d97706" stroke-width="2" class="pin-circle" id="mcu_p022"/>
+              <text x="14" y="4" class="pin-label">P0.22 (NFC RST)</text>
+              <text x="-12" y="4" text-anchor="end" fill="#64748b" font-size="8">7</text>
+            </g>
+
+            <!-- Pin 8: P0.24 (D5 -> NFC IRQ) -->
+            <g transform="translate(18, 330)" class="mcu-pin" onclick="inspectSignal('nfc_irq')">
+              <circle cx="0" cy="0" r="6" fill="#0f172a" stroke="#d97706" stroke-width="2" class="pin-circle" id="mcu_p024"/>
+              <text x="14" y="4" class="pin-label">P0.24 (NFC IRQ)</text>
+              <text x="-12" y="4" text-anchor="end" fill="#64748b" font-size="8">8</text>
+            </g>
+
+            <!-- Pin 9: P1.00 -->
+            <g transform="translate(18, 370)" class="mcu-pin">
+              <circle cx="0" cy="0" r="6" fill="#0f172a" stroke="#64748b" stroke-width="1.5" class="pin-circle"/>
+              <text x="14" y="4" class="pin-label" fill="#64748b">P1.00 (D6)</text>
+              <text x="-12" y="4" text-anchor="end" fill="#64748b" font-size="8">9</text>
+            </g>
+
+            <!-- Pin 10: P0.11 (D7 -> FP TOUCH) -->
+            <g transform="translate(18, 410)" class="mcu-pin" onclick="inspectSignal('fp_wake')">
+              <circle cx="0" cy="0" r="6" fill="#0f172a" stroke="#d97706" stroke-width="2" class="pin-circle" id="mcu_p011"/>
+              <text x="14" y="4" class="pin-label">P0.11 (FP TOUCH)</text>
+              <text x="-12" y="4" text-anchor="end" fill="#64748b" font-size="8">10</text>
+            </g>
+
+            <!-- Pin 11: P1.04 -->
+            <g transform="translate(18, 450)" class="mcu-pin">
+              <circle cx="0" cy="0" r="6" fill="#0f172a" stroke="#64748b" stroke-width="1.5" class="pin-circle"/>
+              <text x="14" y="4" class="pin-label" fill="#64748b">P1.04 (D8)</text>
+              <text x="-12" y="4" text-anchor="end" fill="#64748b" font-size="8">11</text>
+            </g>
+
+            <!-- Pin 12: P1.06 -->
+            <g transform="translate(18, 490)" class="mcu-pin">
+              <circle cx="0" cy="0" r="6" fill="#0f172a" stroke="#64748b" stroke-width="1.5" class="pin-circle"/>
+              <text x="14" y="4" class="pin-label" fill="#64748b">P1.06 (D9)</text>
+              <text x="-12" y="4" text-anchor="end" fill="#64748b" font-size="8">12</text>
+            </g>
+
+
+            <!-- =============================== -->
+            <!-- SuperMini RIGHT HEADER (12 PINS)-->
+            <!-- =============================== -->
+            <!-- Pin 24: RAW / BAT -->
+            <g transform="translate(272, 50)" class="mcu-pin">
+              <circle cx="0" cy="0" r="6" fill="#0f172a" stroke="#64748b" stroke-width="1.5" class="pin-circle"/>
+              <text x="-14" y="4" text-anchor="end" class="pin-label" fill="#64748b">RAW/BAT</text>
+              <text x="12" y="4" fill="#64748b" font-size="8">24</text>
+            </g>
+
+            <!-- Pin 23: GND -->
+            <g transform="translate(272, 90)" class="mcu-pin" onclick="inspectSignal('gnd')">
+              <circle cx="0" cy="0" r="6" fill="#0f172a" stroke="#d97706" stroke-width="2" class="pin-circle" id="mcu_gnd2"/>
+              <text x="-14" y="4" text-anchor="end" class="pin-label" fill="#94a3b8">GND</text>
+              <text x="12" y="4" fill="#64748b" font-size="8">23</text>
+            </g>
+
+            <!-- Pin 22: RST -->
+            <g transform="translate(272, 130)" class="mcu-pin">
+              <circle cx="0" cy="0" r="6" fill="#0f172a" stroke="#64748b" stroke-width="1.5" class="pin-circle"/>
+              <text x="-14" y="4" text-anchor="end" class="pin-label" fill="#64748b">RESET</text>
+              <text x="12" y="4" fill="#64748b" font-size="8">22</text>
+            </g>
+
+            <!-- Pin 21: VCC (3.3V) -->
+            <g transform="translate(272, 170)" class="mcu-pin" onclick="inspectSignal('vcc')">
+              <circle cx="0" cy="0" r="6" fill="#0f172a" stroke="#d97706" stroke-width="2" class="pin-circle" id="mcu_vcc"/>
+              <text x="-14" y="4" text-anchor="end" class="pin-label" fill="#ef4444">VCC (3.3V)</text>
+              <text x="12" y="4" fill="#64748b" font-size="8">21</text>
+            </g>
+
+            <!-- Pin 20: P0.31 -->
+            <g transform="translate(272, 210)" class="mcu-pin">
+              <circle cx="0" cy="0" r="6" fill="#0f172a" stroke="#64748b" stroke-width="1.5" class="pin-circle"/>
+              <text x="-14" y="4" text-anchor="end" class="pin-label" fill="#64748b">P0.31 (A0)</text>
+              <text x="12" y="4" fill="#64748b" font-size="8">20</text>
+            </g>
+
+            <!-- Pin 19: P0.29 -->
+            <g transform="translate(272, 250)" class="mcu-pin">
+              <circle cx="0" cy="0" r="6" fill="#0f172a" stroke="#64748b" stroke-width="1.5" class="pin-circle"/>
+              <text x="-14" y="4" text-anchor="end" class="pin-label" fill="#64748b">P0.29 (A1)</text>
+              <text x="12" y="4" fill="#64748b" font-size="8">19</text>
+            </g>
+
+            <!-- Pin 18: P0.02 -->
+            <g transform="translate(272, 290)" class="mcu-pin">
+              <circle cx="0" cy="0" r="6" fill="#0f172a" stroke="#64748b" stroke-width="1.5" class="pin-circle"/>
+              <text x="-14" y="4" text-anchor="end" class="pin-label" fill="#64748b">P0.02 (A2)</text>
+              <text x="12" y="4" fill="#64748b" font-size="8">18</text>
+            </g>
+
+            <!-- Pin 17: P1.15 -->
+            <g transform="translate(272, 330)" class="mcu-pin">
+              <circle cx="0" cy="0" r="6" fill="#0f172a" stroke="#64748b" stroke-width="1.5" class="pin-circle"/>
+              <text x="-14" y="4" text-anchor="end" class="pin-label" fill="#64748b">P1.15 (A3)</text>
+              <text x="12" y="4" fill="#64748b" font-size="8">17</text>
+            </g>
+
+            <!-- Pin 16: P1.13 (SCK / D18) -->
+            <g transform="translate(272, 370)" class="mcu-pin" onclick="inspectSignal('nfc_sck')">
+              <circle cx="0" cy="0" r="6" fill="#0f172a" stroke="#d97706" stroke-width="2" class="pin-circle" id="mcu_p113"/>
+              <text x="-14" y="4" text-anchor="end" class="pin-label">P1.13 (SCK)</text>
+              <text x="12" y="4" fill="#64748b" font-size="8">16</text>
+            </g>
+
+            <!-- Pin 15: P1.11 (MOSI / D19) -->
+            <g transform="translate(272, 410)" class="mcu-pin" onclick="inspectSignal('nfc_mosi')">
+              <circle cx="0" cy="0" r="6" fill="#0f172a" stroke="#d97706" stroke-width="2" class="pin-circle" id="mcu_p111"/>
+              <text x="-14" y="4" text-anchor="end" class="pin-label">P1.11 (MOSI)</text>
+              <text x="12" y="4" fill="#64748b" font-size="8">15</text>
+            </g>
+
+            <!-- Pin 14: P0.10 (MISO / D20) -->
+            <g transform="translate(272, 450)" class="mcu-pin" onclick="inspectSignal('nfc_miso')">
+              <circle cx="0" cy="0" r="6" fill="#0f172a" stroke="#d97706" stroke-width="2" class="pin-circle" id="mcu_p010"/>
+              <text x="-14" y="4" text-anchor="end" class="pin-label">P0.10 (MISO)</text>
+              <text x="12" y="4" fill="#64748b" font-size="8">14</text>
+            </g>
+
+            <!-- Pin 13: P0.09 (CS / D21) -->
+            <g transform="translate(272, 490)" class="mcu-pin" onclick="inspectSignal('nfc_cs')">
+              <circle cx="0" cy="0" r="6" fill="#0f172a" stroke="#d97706" stroke-width="2" class="pin-circle" id="mcu_p009"/>
+              <text x="-14" y="4" text-anchor="end" class="pin-label">P0.09 (CS/SS)</text>
+              <text x="12" y="4" fill="#64748b" font-size="8">13</text>
+            </g>
+          </g>
+
+          <!-- ============================================== -->
+          <!-- 3. RIGHT COMPONENT: PN532 NFC BREAKOUT MODULE   -->
+          <!-- ============================================== -->
+          <g id="comp_pn532" transform="translate(850, 140)">
+            <!-- Red PCB Breakout -->
+            <rect x="0" y="0" width="230" height="480" rx="12" fill="url(#nfcRedPcb)" stroke="#b91c1c" stroke-width="2" filter="url(#pcbShadow)" />
+
+            <!-- Antenna Copper Traces Loop Representation -->
+            <rect x="18" y="240" width="194" height="215" rx="8" fill="none" stroke="#fbbf24" stroke-width="3" opacity="0.8" />
+            <rect x="26" y="248" width="178" height="199" rx="6" fill="none" stroke="#fbbf24" stroke-width="2.5" opacity="0.7" />
+            <rect x="34" y="256" width="162" height="183" rx="4" fill="none" stroke="#fbbf24" stroke-width="2" opacity="0.6" />
+            <text x="115" y="355" text-anchor="middle" fill="#fef08a" font-size="11" font-weight="700">13.56 MHz ANTENNA</text>
+            <text x="115" y="375" text-anchor="middle" fill="#fee2e2" font-size="8.5">ISO14443-A/MIFARE/NFC</text>
+
+            <!-- PN532 QFN Chip -->
+            <rect x="75" y="145" width="80" height="80" rx="6" fill="#1e293b" stroke="#475569" stroke-width="1.2" />
+            <text x="115" y="180" text-anchor="middle" fill="#f8fafc" font-size="11" font-weight="700">NXP</text>
+            <text x="115" y="198" text-anchor="middle" fill="#fca5a5" font-size="10" font-weight="600">PN532</text>
+
+            <!-- DIP Switch Selector: SPI MODE (SEL0=0, SEL1=0) -->
+            <rect x="35" y="75" width="160" height="52" rx="6" fill="#0f172a" stroke="#475569" stroke-width="1.5" />
+            <text x="115" y="93" text-anchor="middle" fill="#38bdf8" font-size="8.5" font-weight="700">MODE SWITCH (SPI)</text>
+            
+            <!-- Switch 0 (SEL0) -->
+            <rect x="65" y="100" width="36" height="18" rx="3" fill="#334155" />
+            <rect x="67" y="102" width="14" height="14" rx="2" fill="#22c55e" /> <!-- Slider at 0 / Left -->
+            <text x="50" y="113" fill="#cbd5e1" font-size="8" font-weight="600">0</text>
+
+            <!-- Switch 1 (SEL1) -->
+            <rect x="130" y="100" width="36" height="18" rx="3" fill="#334155" />
+            <rect x="132" y="102" width="14" height="14" rx="2" fill="#22c55e" /> <!-- Slider at 0 / Left -->
+            <text x="115" y="113" fill="#cbd5e1" font-size="8" font-weight="600">0</text>
+            
+            <text x="175" y="113" fill="#4ade80" font-size="8" font-weight="700">[SPI]</text>
+
+            <!-- PN532 Header Pins (Left Edge) -->
+            <!-- SCK -->
+            <g transform="translate(14, 30)" class="nfc-pin" onclick="inspectSignal('nfc_sck')">
+              <circle cx="0" cy="0" r="5" fill="#3b82f6" stroke="#93c5fd" stroke-width="1.5" class="pin-circle" id="pn_sck"/>
+              <text x="12" y="4" class="pin-label">SCK</text>
+            </g>
+
+            <!-- MISO -->
+            <g transform="translate(14, 55)" class="nfc-pin" onclick="inspectSignal('nfc_miso')">
+              <circle cx="0" cy="0" r="5" fill="#84cc16" stroke="#bef264" stroke-width="1.5" class="pin-circle" id="pn_miso"/>
+              <text x="12" y="4" class="pin-label">MISO</text>
+            </g>
+
+            <!-- MOSI -->
+            <g transform="translate(14, 80)" class="nfc-pin" onclick="inspectSignal('nfc_mosi')">
+              <circle cx="0" cy="0" r="5" fill="#f97316" stroke="#fdba74" stroke-width="1.5" class="pin-circle" id="pn_mosi"/>
+              <text x="12" y="4" class="pin-label">MOSI</text>
+            </g>
+
+            <!-- NSS / SS / CS -->
+            <g transform="translate(14, 105)" class="nfc-pin" onclick="inspectSignal('nfc_cs')">
+              <circle cx="0" cy="0" r="5" fill="#ec4899" stroke="#f472b6" stroke-width="1.5" class="pin-circle" id="pn_cs"/>
+              <text x="12" y="4" class="pin-label">NSS / CS</text>
+            </g>
+
+            <!-- VCC (3.3V) -->
+            <g transform="translate(14, 130)" class="nfc-pin" onclick="inspectSignal('vcc')">
+              <circle cx="0" cy="0" r="5" fill="#ef4444" stroke="#f87171" stroke-width="1.5" class="pin-circle" id="pn_vcc"/>
+              <text x="12" y="4" class="pin-label" fill="#ef4444">VCC (3.3V)</text>
+            </g>
+
+            <!-- GND -->
+            <g transform="translate(14, 155)" class="nfc-pin" onclick="inspectSignal('gnd')">
+              <circle cx="0" cy="0" r="5" fill="#475569" stroke="#94a3b8" stroke-width="1.5" class="pin-circle" id="pn_gnd"/>
+              <text x="12" y="4" class="pin-label" fill="#94a3b8">GND</text>
+            </g>
+
+            <!-- IRQ -->
+            <g transform="translate(14, 180)" class="nfc-pin" onclick="inspectSignal('nfc_irq')">
+              <circle cx="0" cy="0" r="5" fill="#a855f7" stroke="#d8b4fe" stroke-width="1.5" class="pin-circle" id="pn_irq"/>
+              <text x="12" y="4" class="pin-label">IRQ</text>
+            </g>
+
+            <!-- RSTPD_N / RST -->
+            <g transform="translate(14, 205)" class="nfc-pin" onclick="inspectSignal('nfc_rst')">
+              <circle cx="0" cy="0" r="5" fill="#64748b" stroke="#cbd5e1" stroke-width="1.5" class="pin-circle" id="pn_rst"/>
+              <text x="12" y="4" class="pin-label">RSTPD_N</text>
+            </g>
+          </g>
+
+          <!-- ============================================== -->
+          <!-- 4. INTERCONNECT WIRES WITH INTERACTIVE PATHS  -->
+          <!-- ============================================== -->
+          <g id="wiresGroup">
+            <!-- --------------------------------------- -->
+            <!-- WIRE 1: R558S TXD -> SuperMini P0.08 RX -->
+            <!-- Color: Yellow #f59e0b                    -->
+            <!-- --------------------------------------- -->
+            <path id="wire_fp_tx" class="wire bus-uart" stroke="var(--wire-tx)" 
+                  d="M 160 416 C 240 416, 300 170, 448 170" 
+                  onclick="inspectSignal('fp_tx')"/>
+            <path class="wire-hitbox" d="M 160 416 C 240 416, 300 170, 448 170" onclick="inspectSignal('fp_tx')"/>
+
+            <!-- --------------------------------------- -->
+            <!-- WIRE 2: R558S RXD <- SuperMini P0.06 TX -->
+            <!-- Color: Green #10b981                     -->
+            <!-- --------------------------------------- -->
+            <path id="wire_fp_rx" class="wire bus-uart" stroke="var(--wire-rx)" 
+                  d="M 179 416 C 260 416, 300 130, 448 130" 
+                  onclick="inspectSignal('fp_rx')"/>
+            <path class="wire-hitbox" d="M 179 416 C 260 416, 300 130, 448 130" onclick="inspectSignal('fp_rx')"/>
+
+            <!-- --------------------------------------- -->
+            <!-- WIRE 3: R558S TOUCH WAKE -> SuperMini P0.11-->
+            <!-- Color: Cyan #06b6d4                     -->
+            <!-- --------------------------------------- -->
+            <path id="wire_fp_wake" class="wire bus-touch" stroke="var(--wire-wake)" 
+                  d="M 198 416 C 290 416, 350 490, 448 490" 
+                  onclick="inspectSignal('fp_wake')"/>
+            <path class="wire-hitbox" d="M 198 416 C 290 416, 350 490, 448 490" onclick="inspectSignal('fp_wake')"/>
+
+            <!-- --------------------------------------- -->
+            <!-- WIRE 4 & 5: POWER +3.3V (VCC, 3.3VT, PN532)-->
+            <!-- Color: Red #ef4444                      -->
+            <!-- --------------------------------------- -->
+            <!-- SuperMini VCC (Right Pin 21) to R558S VCC & 3.3VT via top bus -->
+            <path id="wire_vcc_fp" class="wire bus-power" stroke="var(--wire-vcc)" 
+                  d="M 702 250 C 740 250, 750 30, 400 30 C 200 30, 122 100, 122 416" 
+                  onclick="inspectSignal('vcc')"/>
+            <path class="wire-hitbox" d="M 702 250 C 740 250, 750 30, 400 30 C 200 30, 122 100, 122 416" onclick="inspectSignal('vcc')"/>
+
+            <!-- Jumper from R558S VCC (Pin 1) to 3.3VT (Pin 6) -->
+            <path id="wire_vcc_vt" class="wire bus-power" stroke="var(--wire-vt)" 
+                  d="M 122 416 C 122 450, 217 450, 217 416" 
+                  onclick="inspectSignal('fp_vt')"/>
+
+            <!-- SuperMini VCC to PN532 VCC -->
+            <path id="wire_vcc_pn" class="wire bus-power" stroke="var(--wire-vcc)" 
+                  d="M 702 250 C 780 250, 800 270, 864 270" 
+                  onclick="inspectSignal('vcc')"/>
+            <path class="wire-hitbox" d="M 702 250 C 780 250, 800 270, 864 270" onclick="inspectSignal('vcc')"/>
+
+            <!-- --------------------------------------- -->
+            <!-- WIRE 6: COMMON GROUND BUS               -->
+            <!-- Color: Slate/Black #475569              -->
+            <!-- --------------------------------------- -->
+            <!-- SuperMini Pin 3 GND to R558S GND -->
+            <path id="wire_gnd_fp" class="wire bus-power" stroke="var(--wire-gnd)" 
+                  d="M 448 210 C 320 210, 240 380, 141 416" 
+                  onclick="inspectSignal('gnd')"/>
+            <path class="wire-hitbox" d="M 448 210 C 320 210, 240 380, 141 416" onclick="inspectSignal('gnd')"/>
+
+            <!-- SuperMini Pin 23 GND to PN532 GND -->
+            <path id="wire_gnd_pn" class="wire bus-power" stroke="var(--wire-gnd)" 
+                  d="M 702 170 C 770 170, 800 295, 864 295" 
+                  onclick="inspectSignal('gnd')"/>
+            <path class="wire-hitbox" d="M 702 170 C 770 170, 800 295, 864 295" onclick="inspectSignal('gnd')"/>
+
+            <!-- --------------------------------------- -->
+            <!-- WIRE 7: SPI SCK -> SuperMini P1.13      -->
+            <!-- Color: Blue #3b82f6                     -->
+            <!-- --------------------------------------- -->
+            <path id="wire_nfc_sck" class="wire bus-spi" stroke="var(--wire-sck)" 
+                  d="M 864 170 C 790 170, 770 450, 702 450" 
+                  onclick="inspectSignal('nfc_sck')"/>
+            <path class="wire-hitbox" d="M 864 170 C 790 170, 770 450, 702 450" onclick="inspectSignal('nfc_sck')"/>
+
+            <!-- --------------------------------------- -->
+            <!-- WIRE 8: SPI MISO <- SuperMini P0.10     -->
+            <!-- Color: Lime Green #84cc16               -->
+            <!-- --------------------------------------- -->
+            <path id="wire_nfc_miso" class="wire bus-spi" stroke="var(--wire-miso)" 
+                  d="M 864 195 C 785 195, 770 530, 702 530" 
+                  onclick="inspectSignal('nfc_miso')"/>
+            <path class="wire-hitbox" d="M 864 195 C 785 195, 770 530, 702 530" onclick="inspectSignal('nfc_miso')"/>
+
+            <!-- --------------------------------------- -->
+            <!-- WIRE 9: SPI MOSI -> SuperMini P1.11     -->
+            <!-- Color: Orange #f97316                   -->
+            <!-- --------------------------------------- -->
+            <path id="wire_nfc_mosi" class="wire bus-spi" stroke="var(--wire-mosi)" 
+                  d="M 864 220 C 780 220, 770 490, 702 490" 
+                  onclick="inspectSignal('nfc_mosi')"/>
+            <path class="wire-hitbox" d="M 864 220 C 780 220, 770 490, 702 490" onclick="inspectSignal('nfc_mosi')"/>
+
+            <!-- --------------------------------------- -->
+            <!-- WIRE 10: SPI CS/NSS -> SuperMini P0.09  -->
+            <!-- Color: Pink #ec4899                     -->
+            <!-- --------------------------------------- -->
+            <path id="wire_nfc_cs" class="wire bus-spi" stroke="var(--wire-cs)" 
+                  d="M 864 245 C 775 245, 770 570, 702 570" 
+                  onclick="inspectSignal('nfc_cs')"/>
+            <path class="wire-hitbox" d="M 864 245 C 775 245, 770 570, 702 570" onclick="inspectSignal('nfc_cs')"/>
+
+            <!-- --------------------------------------- -->
+            <!-- WIRE 11: PN532 IRQ -> SuperMini P0.24   -->
+            <!-- Color: Purple #a855f7                   -->
+            <!-- --------------------------------------- -->
+            <path id="wire_nfc_irq" class="wire bus-nfc_ctrl" stroke="var(--wire-irq)" 
+                  d="M 864 320 C 800 320, 760 630, 400 630 C 370 630, 360 410, 448 410" 
+                  onclick="inspectSignal('nfc_irq')"/>
+            <path class="wire-hitbox" d="M 864 320 C 800 320, 760 630, 400 630 C 370 630, 360 410, 448 410" onclick="inspectSignal('nfc_irq')"/>
+
+            <!-- --------------------------------------- -->
+            <!-- WIRE 12: PN532 RST -> SuperMini P0.22   -->
+            <!-- Color: Slate #64748b                    -->
+            <!-- --------------------------------------- -->
+            <path id="wire_nfc_rst" class="wire bus-nfc_ctrl" stroke="var(--wire-rst)" 
+                  d="M 864 345 C 790 345, 750 650, 380 650 C 340 650, 340 370, 448 370" 
+                  onclick="inspectSignal('nfc_rst')"/>
+            <path class="wire-hitbox" d="M 864 345 C 790 345, 750 650, 380 650 C 340 650, 340 370, 448 370" onclick="inspectSignal('nfc_rst')"/>
+          </g>
+
+        </svg>
+      </div>
+    </div>
+
+    <!-- Right Sidebar / Inspector Panel -->
+    <div class="sidebar">
+      <div class="sidebar-tabs">
+        <button class="tab-btn active" onclick="switchTab('inspector')">Signal Inspector</button>
+        <button class="tab-btn" onclick="switchTab('pinout')">Full Pin Matrix</button>
+        <button class="tab-btn" onclick="switchTab('sandwich')">3D Sandwich</button>
+      </div>
+
+      <!-- Tab 1: Live Signal Inspector -->
+      <div id="tab-inspector" class="tab-content active">
+        <!-- Live Simulation Banners -->
+        <div id="simTouchBanner" class="sim-banner sim-fingerprint">
+          <div class="live-dot"></div>
+          <div><strong>Touch Event Active!</strong> R558S WAKE pin HIGH (3.3V) &rarr; nRF52840 woke up via P0.11 sense interrupt.</div>
+        </div>
+
+        <div id="simNfcBanner" class="sim-banner sim-nfc">
+          <div class="live-dot"></div>
+          <div><strong>NFC Card Detected!</strong> PN532 IRQ pulled LOW &rarr; SPI frame read initiated over SPIM3.</div>
+        </div>
+
+        <div class="info-card">
+          <h3 id="inspectTitle">👆 Click Any Wire or Pin</h3>
+          <p id="inspectDesc" style="font-size: 0.85rem; color: var(--text-muted); line-height: 1.5;">
+            Select a connection in the schematic or choose a signal filter above to inspect technical specifications, voltage levels, internal pull resistor requirements, and firmware mapping.
+          </p>
+        </div>
+
+        <div class="info-card" id="inspectDetailsCard" style="display: none;">
+          <h3>Connection Specifications</h3>
+          <div class="pin-row">
+            <span style="color: var(--text-muted);">Signal Name:</span>
+            <span id="detailSignal" style="font-weight: 700; color: #38bdf8;">--</span>
+          </div>
+          <div class="pin-row">
+            <span style="color: var(--text-muted);">MCU Pin:</span>
+            <span id="detailMcuPin" style="font-weight: 600;">--</span>
+          </div>
+          <div class="pin-row">
+            <span style="color: var(--text-muted);">Target Peripheral:</span>
+            <span id="detailTarget" style="font-weight: 600;">--</span>
+          </div>
+          <div class="pin-row">
+            <span style="color: var(--text-muted);">Wire Color:</span>
+            <span id="detailColor" class="pill pill-yellow">--</span>
+          </div>
+          <div class="pin-row">
+            <span style="color: var(--text-muted);">Electrical Level:</span>
+            <span id="detailVoltage" class="pill pill-green">3.3V DC</span>
+          </div>
+          <div class="pin-row">
+            <span style="color: var(--text-muted);">Direction:</span>
+            <span id="detailDirection" style="font-weight: 600;">--</span>
+          </div>
+          <div style="margin-top: 12px; font-size: 0.82rem; color: #cbd5e1; line-height: 1.45;" id="detailNotes">
+            --
+          </div>
+        </div>
+
+        <div class="info-card">
+          <h3>⚡ Electrical Rules & Warnings</h3>
+          <ul style="font-size: 0.82rem; color: var(--text-muted); padding-left: 18px; line-height: 1.55;">
+            <li><strong>All logic is 3.3V:</strong> Never apply 5V directly to nRF52840 or R558S pins.</li>
+            <li><strong>PN532 SPI Mode:</strong> Ensure DIP switches are both at <strong>0 (OFF)</strong>.</li>
+            <li><strong>R558S 3.3VT:</strong> Must be powered continuously (3.3V) for capacitive touch detection to wake MCU.</li>
+            <li><strong>NFC Shielding:</strong> Keep metal and LiPo cells separated from the PN532 antenna using a 13.56MHz ferrite absorber sheet.</li>
+          </ul>
+        </div>
+      </div>
+
+      <!-- Tab 2: Full Pin Matrix Table -->
+      <div id="tab-pinout" class="tab-content">
+        <div class="info-card">
+          <h3>Pin Connections Summary</h3>
+          <div style="overflow-x: auto;">
+            <table style="width: 100%; border-collapse: collapse; font-size: 0.78rem;">
+              <thead>
+                <tr style="border-bottom: 1px solid var(--border-color); color: var(--text-muted); text-align: left;">
+                  <th style="padding: 6px;">MCU Pin</th>
+                  <th style="padding: 6px;">Periph</th>
+                  <th style="padding: 6px;">Wire</th>
+                  <th style="padding: 6px;">Function</th>
+                </tr>
+              </thead>
+              <tbody style="color: #cbd5e1;">
+                <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+                  <td style="padding: 6px; font-weight:700; color:#f59e0b;">P0.06</td>
+                  <td style="padding: 6px;">R558S</td>
+                  <td style="padding: 6px;"><span class="pill pill-green">Green</span></td>
+                  <td style="padding: 6px;">UART TX &rarr; RXD</td>
+                </tr>
+                <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+                  <td style="padding: 6px; font-weight:700; color:#f59e0b;">P0.08</td>
+                  <td style="padding: 6px;">R558S</td>
+                  <td style="padding: 6px;"><span class="pill pill-yellow">Yellow</span></td>
+                  <td style="padding: 6px;">UART RX &larr; TXD</td>
+                </tr>
+                <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+                  <td style="padding: 6px; font-weight:700; color:#06b6d4;">P0.11</td>
+                  <td style="padding: 6px;">R558S</td>
+                  <td style="padding: 6px;"><span class="pill pill-blue">Blue</span></td>
+                  <td style="padding: 6px;">WAKE Touch Int</td>
+                </tr>
+                <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+                  <td style="padding: 6px; font-weight:700; color:#3b82f6;">P1.13</td>
+                  <td style="padding: 6px;">PN532</td>
+                  <td style="padding: 6px;"><span class="pill pill-blue">Blue</span></td>
+                  <td style="padding: 6px;">SPIM3 SCK</td>
+                </tr>
+                <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+                  <td style="padding: 6px; font-weight:700; color:#f97316;">P1.11</td>
+                  <td style="padding: 6px;">PN532</td>
+                  <td style="padding: 6px;"><span class="pill pill-yellow">Orange</span></td>
+                  <td style="padding: 6px;">SPIM3 MOSI</td>
+                </tr>
+                <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+                  <td style="padding: 6px; font-weight:700; color:#84cc16;">P0.10</td>
+                  <td style="padding: 6px;">PN532</td>
+                  <td style="padding: 6px;"><span class="pill pill-green">Lime</span></td>
+                  <td style="padding: 6px;">SPIM3 MISO</td>
+                </tr>
+                <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+                  <td style="padding: 6px; font-weight:700; color:#ec4899;">P0.09</td>
+                  <td style="padding: 6px;">PN532</td>
+                  <td style="padding: 6px;"><span class="pill pill-purple">Pink</span></td>
+                  <td style="padding: 6px;">SPIM3 CS / NSS</td>
+                </tr>
+                <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+                  <td style="padding: 6px; font-weight:700; color:#a855f7;">P0.24</td>
+                  <td style="padding: 6px;">PN532</td>
+                  <td style="padding: 6px;"><span class="pill pill-purple">Purple</span></td>
+                  <td style="padding: 6px;">NFC IRQ (Low)</td>
+                </tr>
+                <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+                  <td style="padding: 6px; font-weight:700; color:#64748b;">P0.22</td>
+                  <td style="padding: 6px;">PN532</td>
+                  <td style="padding: 6px;"><span class="pill">Slate</span></td>
+                  <td style="padding: 6px;">NFC RSTPD_N</td>
+                </tr>
+                <tr>
+                  <td style="padding: 6px; font-weight:700; color:#ef4444;">VCC</td>
+                  <td style="padding: 6px;">All</td>
+                  <td style="padding: 6px;"><span class="pill pill-red">Red</span></td>
+                  <td style="padding: 6px;">+3.3V DC Rail</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab 3: 3D Sandwich Assembly Structure -->
+      <div id="tab-sandwich" class="tab-content">
+        <div class="info-card">
+          <h3>Token Layer Stack Architecture</h3>
+          <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 12px;">
+            Optimized enclosure packaging to avoid RF interference between the battery and the 13.56 MHz NFC antenna.
+          </p>
+
+          <div class="sandwich-layer">
+            <div class="sandwich-layer-num">1</div>
+            <div>
+              <div style="font-weight: 700; font-size: 0.85rem; color: #f1f5f9;">Top Bezel: R558S Sensor</div>
+              <div style="font-size: 0.75rem; color: var(--text-muted);">Front face with RGB LED halo ring exposed for touch & status</div>
+            </div>
+          </div>
+
+          <div class="sandwich-layer">
+            <div class="sandwich-layer-num">2</div>
+            <div>
+              <div style="font-weight: 700; font-size: 0.85rem; color: #38bdf8;">Core: nRF52840 SuperMini</div>
+              <div style="font-size: 0.75rem; color: var(--text-muted);">USB-C port aligned with front edge; BLE ceramic antenna at bottom</div>
+            </div>
+          </div>
+
+          <div class="sandwich-layer">
+            <div class="sandwich-layer-num">3</div>
+            <div>
+              <div style="font-weight: 700; font-size: 0.85rem; color: #fbbf24;">Power: 180mAh 3.7V LiPo Cell</div>
+              <div style="font-size: 0.75rem; color: var(--text-muted);">Ultra-slim pouch cell connected to B+/B- solder pads</div>
+            </div>
+          </div>
+
+          <div class="sandwich-layer" style="border-color: #f43f5e; background: rgba(244, 63, 94, 0.08);">
+            <div class="sandwich-layer-num" style="color: #f43f5e; border-color: #f43f5e;">⚡</div>
+            <div>
+              <div style="font-weight: 700; font-size: 0.85rem; color: #fb7185;">Shield: 13.56MHz Ferrite Absorber</div>
+              <div style="font-size: 0.75rem; color: #fda4af;"><strong>Mandatory!</strong> Prevents battery metal from detuning NFC antenna resonance</div>
+            </div>
+          </div>
+
+          <div class="sandwich-layer">
+            <div class="sandwich-layer-num">4</div>
+            <div>
+              <div style="font-weight: 700; font-size: 0.85rem; color: #f87171;">Bottom: PN532 NFC Coil</div>
+              <div style="font-size: 0.75rem; color: var(--text-muted);">Loop antenna facing outward through enclosure bottom shell</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Signal Data Dictionary
+    const signalData = {
+      fp_tx: {
+        title: "R558S TXD &rarr; nRF52840 P0.08 (UART RX)",
+        signal: "UART0 RX (Serial Data In)",
+        mcuPin: "P0.08 (Pin 2 / D1)",
+        target: "R558S Pin 3 (Yellow wire)",
+        color: "Yellow",
+        colorClass: "pill-yellow",
+        voltage: "3.3V TTL",
+        direction: "Sensor &rarr; MCU",
+        desc: "Carries 57,600 baud serial responses, fingerprint template match packets, and status ACK bytes from the R558S DSP back to the nRF52840 MCU."
+      },
+      fp_rx: {
+        title: "nRF52840 P0.06 (UART TX) &rarr; R558S RXD",
+        signal: "UART0 TX (Serial Data Out)",
+        mcuPin: "P0.06 (Pin 1 / D0)",
+        target: "R558S Pin 4 (Green wire)",
+        color: "Green",
+        colorClass: "pill-green",
+        voltage: "3.3V TTL",
+        direction: "MCU &rarr; Sensor",
+        desc: "Transmits command packets from the nRF52840 (e.g. PS_GetImage, PS_GenChar, PS_Match, LED ring RGB color control commands) to the sensor."
+      },
+      fp_wake: {
+        title: "R558S WAKE / TOUCH &rarr; nRF52840 P0.11",
+        signal: "Touch Detect Interrupt",
+        mcuPin: "P0.11 (Pin 10 / D7)",
+        target: "R558S Pin 5 (Blue wire)",
+        color: "Cyan / Blue",
+        colorClass: "pill-blue",
+        voltage: "3.3V Active HIGH",
+        direction: "Sensor &rarr; MCU",
+        desc: "Inductive touch output. Normal idle = 0V. When a human finger touches the metallic ring, output goes HIGH (3.3V). Configured with Sense HIGH in nRF52840 to wake the SoC from ultra-low power System OFF mode (<2µA)."
+      },
+      fp_vt: {
+        title: "3.3VT Standby Touch Power",
+        signal: "Capacitive Circuit Power",
+        mcuPin: "VCC Rail (Pin 21)",
+        target: "R558S Pin 6 (White/Purple wire)",
+        color: "Purple",
+        colorClass: "pill-purple",
+        voltage: "+3.3V DC Continuous",
+        direction: "Power Rail &rarr; Sensor",
+        desc: "Supplies continuous low-quiescent current (<5µA) to the capacitive detection sensing amplifier so the touch ring remains sensitive even when the main sensor DSP is asleep."
+      },
+      nfc_sck: {
+        title: "PN532 SCK &larr; nRF52840 P1.13",
+        signal: "SPIM3 SCK (Serial Clock)",
+        mcuPin: "P1.13 (Pin 16 / D18)",
+        target: "PN532 SCK Pin",
+        color: "Blue",
+        colorClass: "pill-blue",
+        voltage: "3.3V Logic (Mode 0)",
+        direction: "MCU &rarr; PN532",
+        desc: "SPI clock generator. In Nordic Zephyr SPIM3, clock runs at 1 MHz to 5 MHz (CPOL=0, CPHA=0 / Mode 0)."
+      },
+      nfc_mosi: {
+        title: "PN532 MOSI &larr; nRF52840 P1.11",
+        signal: "SPIM3 MOSI (Master Out)",
+        mcuPin: "P1.11 (Pin 15 / D19)",
+        target: "PN532 MOSI Pin",
+        color: "Orange",
+        colorClass: "pill-yellow",
+        voltage: "3.3V Logic",
+        direction: "MCU &rarr; PN532",
+        desc: "Master data line carrying command frames, ISO14443-A APDUs, and cryptographic keys to the PN532 NFC controller."
+      },
+      nfc_miso: {
+        title: "PN532 MISO &rarr; nRF52840 P0.10",
+        signal: "SPIM3 MISO (Master In)",
+        mcuPin: "P0.10 (Pin 14 / D20)",
+        target: "PN532 MISO Pin",
+        color: "Lime Green",
+        colorClass: "pill-green",
+        voltage: "3.3V Logic",
+        direction: "PN532 &rarr; MCU",
+        desc: "Carries responses, card UID bytes, and NFC tag payloads back to the nRF52840."
+      },
+      nfc_cs: {
+        title: "PN532 NSS / CS &larr; nRF52840 P0.09",
+        signal: "SPIM3 Chip Select",
+        mcuPin: "P0.09 (Pin 13 / D21)",
+        target: "PN532 NSS / SS Pin",
+        color: "Pink",
+        colorClass: "pill-purple",
+        voltage: "3.3V Active LOW",
+        direction: "MCU &rarr; PN532",
+        desc: "Hardware Slave Select. Driven LOW by nRF52840 before beginning each SPI packet transaction, and driven HIGH upon completion."
+      },
+      nfc_irq: {
+        title: "PN532 IRQ &rarr; nRF52840 P0.24",
+        signal: "Interrupt Request",
+        mcuPin: "P0.24 (Pin 8 / D5)",
+        target: "PN532 IRQ Pin",
+        color: "Purple",
+        colorClass: "pill-purple",
+        voltage: "3.3V Active LOW",
+        direction: "PN532 &rarr; MCU",
+        desc: "Open-drain active LOW interrupt output from PN532. Triggers when an external NFC tag/card enters the 13.56MHz RF field or when a packet frame is ready for retrieval. Requires internal pull-up enabled on P0.24."
+      },
+      nfc_rst: {
+        title: "PN532 RSTPD_N &larr; nRF52840 P0.22",
+        signal: "Hardware Reset / Power Down",
+        mcuPin: "P0.22 (Pin 7 / D4)",
+        target: "PN532 RSTPD_N Pin",
+        color: "Slate",
+        colorClass: "pill",
+        voltage: "3.3V Active LOW",
+        direction: "MCU &rarr; PN532",
+        desc: "Hard reset and power-down control. Driving P0.22 LOW puts the PN532 into low-power sleep (~10µA); driving HIGH wakes and boots the PN532."
+      },
+      vcc: {
+        title: "Main System Power (+3.3V DC Rail)",
+        signal: "+3.3V Regulated Rail",
+        mcuPin: "VCC (Pin 21)",
+        target: "R558S VCC, 3.3VT & PN532 VCC",
+        color: "Red",
+        colorClass: "pill-red",
+        voltage: "+3.3V DC (&plusmn;2%)",
+        direction: "Power Distribution",
+        desc: "Supplied by the onboard ME6211 low-dropout regulator on the SuperMini board (rated for 500mA peak). Distributes clean 3.3V to all digital sensors."
+      },
+      gnd: {
+        title: "Common System Ground (0V Return)",
+        signal: "GND Ground Bus",
+        mcuPin: "GND (Pin 3 & Pin 23)",
+        target: "All Common Grounds",
+        color: "Black / Slate",
+        colorClass: "pill",
+        voltage: "0V Reference",
+        direction: "Common Return",
+        desc: "Low-impedance common ground reference linking the nRF52840, R558S biometric engine, and PN532 NFC analog RF circuit."
+      }
+    };
+
+    function inspectSignal(key) {
+      const data = signalData[key];
+      if (!data) return;
+
+      // Switch to inspector tab if not active
+      switchTab('inspector');
+
+      // Update Inspector panel
+      document.getElementById('inspectTitle').innerHTML = data.title;
+      document.getElementById('inspectDesc').style.display = 'none';
+      document.getElementById('inspectDetailsCard').style.display = 'block';
+
+      document.getElementById('detailSignal').innerText = data.signal;
+      document.getElementById('detailMcuPin').innerText = data.mcuPin;
+      document.getElementById('detailTarget').innerText = data.target;
+      
+      const colEl = document.getElementById('detailColor');
+      colEl.innerText = data.color;
+      colEl.className = 'pill ' + data.colorClass;
+
+      document.getElementById('detailVoltage').innerText = data.voltage;
+      document.getElementById('detailDirection').innerText = data.direction;
+      document.getElementById('detailNotes').innerText = data.desc;
+
+      // Highlight target wire in SVG
+      const wires = document.querySelectorAll('.wire');
+      wires.forEach(w => {
+        w.classList.remove('highlighted');
+        w.classList.add('dimmed');
+      });
+
+      // Target matching wire
+      const targetWire = document.getElementById('wire_' + key);
+      if (targetWire) {
+        targetWire.classList.remove('dimmed');
+        targetWire.classList.add('highlighted');
+      } else if (key === 'vcc') {
+        const vccFp = document.getElementById('wire_vcc_fp');
+        const vccPn = document.getElementById('wire_vcc_pn');
+        const vccVt = document.getElementById('wire_vcc_vt');
+        if (vccFp) { vccFp.classList.remove('dimmed'); vccFp.classList.add('highlighted'); }
+        if (vccPn) { vccPn.classList.remove('dimmed'); vccPn.classList.add('highlighted'); }
+        if (vccVt) { vccVt.classList.remove('dimmed'); vccVt.classList.add('highlighted'); }
+      } else if (key === 'gnd') {
+        const gndFp = document.getElementById('wire_gnd_fp');
+        const gndPn = document.getElementById('wire_gnd_pn');
+        if (gndFp) { gndFp.classList.remove('dimmed'); gndFp.classList.add('highlighted'); }
+        if (gndPn) { gndPn.classList.remove('dimmed'); gndPn.classList.add('highlighted'); }
+      }
+    }
+
+    function setBusFilter(bus) {
+      // Update filter button styling
+      document.querySelectorAll('.filter-btn').forEach(btn => btn.classList.remove('active'));
+      event.target.classList.add('active');
+
+      const wires = document.querySelectorAll('.wire');
+      if (bus === 'all') {
+        wires.forEach(w => {
+          w.classList.remove('dimmed', 'highlighted');
+        });
+        document.getElementById('inspectTitle').innerHTML = '⚡ All Signals Active';
+        document.getElementById('inspectDesc').style.display = 'block';
+        document.getElementById('inspectDetailsCard').style.display = 'none';
+        return;
+      }
+
+      wires.forEach(w => {
+        if (w.classList.contains('bus-' + bus)) {
+          w.classList.remove('dimmed');
+          w.classList.add('highlighted');
+        } else {
+          w.classList.add('dimmed');
+          w.classList.remove('highlighted');
+        }
+      });
+    }
+
+    function switchTab(tabName) {
+      document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+      document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+
+      const targetTab = document.getElementById('tab-' + tabName);
+      if (targetTab) {
+        targetTab.classList.add('active');
+      }
+
+      event?.currentTarget?.classList?.add('active');
+    }
+
+    // Touch Simulation Trigger
+    let touchActive = false;
+    function simulateTouch() {
+      touchActive = !touchActive;
+      const btn = document.getElementById('btnTouchSim');
+      const banner = document.getElementById('simTouchBanner');
+      const fpHalo = document.getElementById('fpHaloRing');
+      const wakeWire = document.getElementById('wire_fp_wake');
+
+      if (touchActive) {
+        btn.classList.add('active');
+        banner.classList.add('active');
+        fpHalo.style.stroke = '#22c55e';
+        fpHalo.style.strokeWidth = '10px';
+        wakeWire.classList.add('wire-pulse', 'highlighted');
+        inspectSignal('fp_wake');
+      } else {
+        btn.classList.remove('active');
+        banner.classList.remove('active');
+        fpHalo.style.stroke = '#06b6d4';
+        fpHalo.style.strokeWidth = '6px';
+        wakeWire.classList.remove('wire-pulse');
+      }
+    }
+
+    // NFC Simulation Trigger
+    let nfcActive = false;
+    function simulateNfc() {
+      nfcActive = !nfcActive;
+      const btn = document.getElementById('btnNfcSim');
+      const banner = document.getElementById('simNfcBanner');
+      const irqWire = document.getElementById('wire_nfc_irq');
+      const sckWire = document.getElementById('wire_nfc_sck');
+      const mosiWire = document.getElementById('wire_nfc_mosi');
+      const misoWire = document.getElementById('wire_nfc_miso');
+
+      if (nfcActive) {
+        btn.classList.add('active');
+        banner.classList.add('active');
+        irqWire.classList.add('wire-pulse', 'highlighted');
+        sckWire.classList.add('wire-pulse');
+        mosiWire.classList.add('wire-pulse');
+        misoWire.classList.add('wire-pulse');
+        inspectSignal('nfc_irq');
+      } else {
+        btn.classList.remove('active');
+        banner.classList.remove('active');
+        irqWire.classList.remove('wire-pulse');
+        sckWire.classList.remove('wire-pulse');
+        mosiWire.classList.remove('wire-pulse');
+        misoWire.classList.remove('wire-pulse');
+      }
+    }
+  </script>
+</body>
+</html>

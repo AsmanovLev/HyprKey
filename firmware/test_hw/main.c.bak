@@ -1,0 +1,306 @@
+#include <stdint.h>
+#include <stdbool.h>
+
+/* nRF52840 Memory Map */
+#define CLOCK_BASE      0x40000000UL
+#define UART1_BASE      0x40028000UL
+#define P0_BASE         0x50000000UL
+#define P1_BASE         0x50000300UL
+
+/* CLOCK */
+#define CLOCK_TASKS_HFCLKSTART    (*(volatile uint32_t *)(CLOCK_BASE + 0x000))
+#define CLOCK_EVENTS_HFCLKSTARTED (*(volatile uint32_t *)(CLOCK_BASE + 0x100))
+
+/* GPIO Registers */
+#define P0_OUTSET       (*(volatile uint32_t *)(P0_BASE + 0x508))
+#define P0_OUTCLR       (*(volatile uint32_t *)(P0_BASE + 0x50C))
+#define P0_IN           (*(volatile uint32_t *)(P0_BASE + 0x510))
+#define P0_DIRSET       (*(volatile uint32_t *)(P0_BASE + 0x518))
+#define P0_PIN_CNF(n)   (*(volatile uint32_t *)(P0_BASE + 0x700 + ((n) * 4)))
+
+#define P1_OUTSET       (*(volatile uint32_t *)(P1_BASE + 0x508))
+#define P1_OUTCLR       (*(volatile uint32_t *)(P1_BASE + 0x50C))
+#define P1_IN           (*(volatile uint32_t *)(P1_BASE + 0x510))
+#define P1_DIRSET       (*(volatile uint32_t *)(P1_BASE + 0x518))
+#define P1_PIN_CNF(n)   (*(volatile uint32_t *)(P1_BASE + 0x700 + ((n) * 4)))
+
+/* UARTE1 (CH340 Debug @ 115200 baud on P0.10) */
+#define UART1_TASKS_STARTTX   (*(volatile uint32_t *)(UART1_BASE + 0x008))
+#define UART1_ENABLE          (*(volatile uint32_t *)(UART1_BASE + 0x500))
+#define UART1_PSEL_TXD        (*(volatile uint32_t *)(UART1_BASE + 0x50C))
+#define UART1_PSEL_RXD        (*(volatile uint32_t *)(UART1_BASE + 0x514))
+#define UART1_BAUDRATE        (*(volatile uint32_t *)(UART1_BASE + 0x524))
+#define UART1_TXD_PTR         (*(volatile uint32_t *)(UART1_BASE + 0x544))
+#define UART1_TXD_MAXCNT      (*(volatile uint32_t *)(UART1_BASE + 0x548))
+#define UART1_EVENTS_ENDTX    (*(volatile uint32_t *)(UART1_BASE + 0x120))
+
+/* Pins */
+#define PIN_LED         15  /* P0.15 (Active LOW) */
+#define PIN_DEBUG_TX    10  /* P0.10 (Hardware UART1 TX @ 115200) */
+
+/* PN532 SPI Pins */
+#define PIN_SPI_SCK     17  /* P0.17 */
+#define PIN_SPI_MISO    20  /* P0.20 */
+#define PIN_SPI_MOSI    22  /* P0.22 */
+#define PIN_SPI_CS      24  /* P0.24 (Active LOW) */
+#define PIN_NFC_RST     6   /* P1.06 */
+#define PIN_NFC_IRQ     4   /* P1.04 */
+
+static uint8_t dbg_dma_buf[128] __attribute__((aligned(4)));
+
+static void delay_cycles(volatile uint32_t count) {
+    while (count--) __asm__ volatile ("nop");
+}
+
+static void delay_us(uint32_t us) {
+    delay_cycles(us * 16);
+}
+
+static void delay_ms(uint32_t ms) {
+    while (ms--) delay_us(1000);
+}
+
+static inline void led_on(void)  { P0_OUTCLR = (1UL << PIN_LED); }
+static inline void led_off(void) { P0_OUTSET = (1UL << PIN_LED); }
+
+static void dbg_send(const uint8_t *data, uint8_t len) {
+    if (len == 0) return;
+    for (uint8_t i = 0; i < len; i++) dbg_dma_buf[i] = data[i];
+    UART1_TXD_PTR = (uint32_t)dbg_dma_buf;
+    UART1_TXD_MAXCNT = len;
+    UART1_EVENTS_ENDTX = 0;
+    UART1_TASKS_STARTTX = 1;
+    while (!UART1_EVENTS_ENDTX);
+}
+
+static void dbg_print(const char *s) {
+    uint8_t len = 0;
+    while (s[len] && len < 120) len++;
+    dbg_send((const uint8_t *)s, len);
+}
+
+static void dbg_hex(uint8_t b) {
+    const char hex[] = "0123456789ABCDEF";
+    uint8_t buf[2] = { (uint8_t)hex[(b >> 4) & 0x0F], (uint8_t)hex[b & 0x0F] };
+    dbg_send(buf, 2);
+}
+
+/* ==================== SPI LSB FIRST ==================== */
+static inline void cs_low(void) {
+    P0_OUTCLR = (1UL << PIN_SPI_CS);
+    delay_us(50);
+}
+
+static inline void cs_high(void) {
+    delay_us(50);
+    P0_OUTSET = (1UL << PIN_SPI_CS);
+    delay_us(100);
+}
+
+static uint8_t spi_transfer(uint8_t b) {
+    uint8_t rx = 0;
+    for (int i = 0; i < 8; i++) {
+        if (b & (1 << i)) {
+            P0_OUTSET = (1UL << PIN_SPI_MOSI);
+        } else {
+            P0_OUTCLR = (1UL << PIN_SPI_MOSI);
+        }
+        delay_us(5);
+        P0_OUTSET = (1UL << PIN_SPI_SCK);
+        delay_us(5);
+        if (P0_IN & (1UL << PIN_SPI_MISO)) {
+            rx |= (1 << i);
+        }
+        P0_OUTCLR = (1UL << PIN_SPI_SCK);
+        delay_us(5);
+    }
+    return rx;
+}
+
+static void pn532_write_command(const uint8_t *cmd, uint8_t len) {
+    uint8_t dcs = 0xD4;
+    for (int i = 0; i < len; i++) dcs += cmd[i];
+    dcs = (uint8_t)(0x100 - dcs);
+
+    cs_low();
+    spi_transfer(0x01); /* DATAWRITE */
+    spi_transfer(0x00);
+    spi_transfer(0x00);
+    spi_transfer(0xFF);
+    spi_transfer(len + 1);
+    spi_transfer((uint8_t)(0x100 - (len + 1)));
+    spi_transfer(0xD4);
+    for (int i = 0; i < len; i++) spi_transfer(cmd[i]);
+    spi_transfer(dcs);
+    spi_transfer(0x00);
+    cs_high();
+}
+
+/* Wait using IRQ pin (active LOW) OR STATREAD fallback */
+static bool pn532_wait_ready_irq(uint32_t timeout_ms) {
+    while (timeout_ms--) {
+        /* Check IRQ pin P1.04 (LOW = ready) */
+        if ((P1_IN & (1UL << PIN_NFC_IRQ)) == 0) {
+            return true;
+        }
+        /* Fallback STATREAD */
+        cs_low();
+        spi_transfer(0x02);
+        uint8_t stat = spi_transfer(0x00);
+        cs_high();
+        if (stat & 0x01) return true;
+
+        delay_ms(1);
+    }
+    return false;
+}
+
+static uint8_t pn532_read_response(uint8_t *buf, uint8_t maxlen) {
+    if (!pn532_wait_ready_irq(150)) return 0;
+
+    cs_low();
+    spi_transfer(0x03); /* DATAREAD */
+
+    for (int i = 0; i < 20; i++) {
+        if (spi_transfer(0x00) == 0x00 && spi_transfer(0x00) == 0xFF) break;
+    }
+
+    uint8_t len = spi_transfer(0x00);
+    (void)spi_transfer(0x00); /* LCS */
+    (void)spi_transfer(0x00); /* TFI */
+
+    uint8_t read_bytes = (len > 1) ? (len - 1) : 0;
+    if (read_bytes > maxlen) read_bytes = maxlen;
+
+    for (uint8_t i = 0; i < read_bytes; i++) {
+        buf[i] = spi_transfer(0x00);
+    }
+    cs_high();
+    return read_bytes;
+}
+
+int main(void) {
+    CLOCK_TASKS_HFCLKSTART = 1;
+    while (!CLOCK_EVENTS_HFCLKSTARTED);
+
+    P0_DIRSET = (1UL << PIN_LED);
+    P0_PIN_CNF(PIN_LED) = 0x00000001UL;
+    led_off();
+
+    P0_DIRSET = (1UL << PIN_DEBUG_TX);
+    P0_OUTSET = (1UL << PIN_DEBUG_TX);
+    P0_PIN_CNF(PIN_DEBUG_TX) = 0x00000001UL;
+
+    P0_DIRSET = (1UL << PIN_SPI_CS) | (1UL << PIN_SPI_SCK) | (1UL << PIN_SPI_MOSI);
+    P0_PIN_CNF(PIN_SPI_CS)   = 0x00000001UL;
+    P0_PIN_CNF(PIN_SPI_SCK)  = 0x00000001UL;
+    P0_PIN_CNF(PIN_SPI_MOSI) = 0x00000001UL;
+    P0_PIN_CNF(PIN_SPI_MISO) = 0x00000000UL;
+    cs_high();
+    P0_OUTCLR = (1UL << PIN_SPI_SCK);
+
+    P1_DIRSET = (1UL << PIN_NFC_RST);
+    P1_PIN_CNF(PIN_NFC_RST) = 0x00000001UL;
+
+    /* NFC IRQ: Input with Pull-up */
+    P1_PIN_CNF(PIN_NFC_IRQ) = (3UL << 2);
+
+    UART1_PSEL_TXD = PIN_DEBUG_TX;
+    UART1_PSEL_RXD = 0xFFFFFFFFUL;
+    UART1_BAUDRATE = 0x01D7E000UL;
+    UART1_ENABLE = 8;
+
+    /* Hard Reset PN532 */
+    P1_OUTCLR = (1UL << PIN_NFC_RST);
+    delay_ms(15);
+    P1_OUTSET = (1UL << PIN_NFC_RST);
+    delay_ms(40);
+
+    /* SAMConfig */
+    static const uint8_t sam_cmd[] = { 0x14, 0x01, 0x14, 0x01 };
+    pn532_write_command(sam_cmd, sizeof(sam_cmd));
+    delay_ms(15);
+    uint8_t dummy[8];
+    pn532_read_response(dummy, sizeof(dummy));
+
+    /* RFConfiguration (0x32), cfgItem=0x05 (MaxRetries: 0xFF = infinite retries until tag is detected) */
+    static const uint8_t retries_cmd[] = { 0x32, 0x05, 0xFF, 0x01, 0xFF };
+    pn532_write_command(retries_cmd, sizeof(retries_cmd));
+    delay_ms(15);
+    pn532_read_response(dummy, sizeof(dummy));
+
+    uint8_t tag[32];
+
+    while (1) {
+        /* Ask PN532 to detect 1 ISO14443A card */
+        static const uint8_t list_cmd[] = { 0x4A, 0x01, 0x00 };
+        pn532_write_command(list_cmd, sizeof(list_cmd));
+
+        /* Read with IRQ wait */
+        uint8_t tlen = pn532_read_response(tag, sizeof(tag));
+
+        bool irq_now = (P1_IN & (1UL << PIN_NFC_IRQ)) != 0;
+
+        dbg_print("IRQ=");
+        dbg_print(irq_now ? "1" : "0");
+        dbg_print(" len=");
+        dbg_hex(tlen);
+
+        if (tlen > 0) {
+            dbg_print(" cmd=0x");
+            dbg_hex(tag[0]);
+            dbg_print(" num=");
+            dbg_hex(tag[1]);
+        }
+
+        if (tlen >= 7 && tag[0] == 0x4B && tag[1] >= 1) {
+            led_on();
+            uint8_t uid_len = tag[6];
+            dbg_print(" >>> UID: ");
+            for (int i = 0; i < uid_len && i < 10; i++) {
+                dbg_hex(tag[7 + i]);
+                dbg_print(" ");
+            }
+            dbg_print("<<<");
+            delay_ms(250);
+            led_off();
+        }
+        dbg_print("\r\n");
+
+        delay_ms(100);
+    }
+
+    return 0;
+}
+
+/* Startup Vector Table */
+extern uint32_t _estack, _etext, _sdata, _edata, _sbss, _ebss;
+
+void Reset_Handler(void) {
+    uint32_t *src = &_etext;
+    uint32_t *dst = &_sdata;
+    while (dst < &_edata) *dst++ = *src++;
+    dst = &_sbss;
+    while (dst < &_ebss) *dst++ = 0;
+    main();
+    while (1);
+}
+
+void Default_Handler(void) { while (1); }
+
+__attribute__((section(".isr_vector"), used))
+const uint32_t vector_table[] = {
+    (uint32_t)&_estack,
+    (uint32_t)Reset_Handler,
+    (uint32_t)Default_Handler,
+    (uint32_t)Default_Handler,
+    (uint32_t)Default_Handler,
+    (uint32_t)Default_Handler,
+    (uint32_t)Default_Handler,
+    0, 0, 0, 0,
+    (uint32_t)Default_Handler,
+    (uint32_t)Default_Handler,
+    0,
+    (uint32_t)Default_Handler,
+    (uint32_t)Default_Handler,
+};
