@@ -263,6 +263,17 @@ int uECC_sign(const uint8_t *private_key,
               uint8_t *signature,
               uECC_Curve curve);
 
+/* uECC_sign_with_recid() function:
+   Computes ECDSA signature (r, s) with canonical low-s (BIP-62 / EIP-2)
+   and outputs the recovery parameter recid (0 or 1).
+   Used for Ethereum (v = 27 + recid) and Bitcoin (BIP-137). */
+int uECC_sign_with_recid(const uint8_t *private_key,
+                         const uint8_t *message_hash,
+                         unsigned hash_size,
+                         uint8_t *signature,
+                         uint8_t *recid,
+                         uECC_Curve curve);
+
 /* uECC_HashContext structure.
 This is used to pass in an arbitrary hash function to uECC_sign_deterministic().
 The structure will be used for multiple hash computations; each time a new hash

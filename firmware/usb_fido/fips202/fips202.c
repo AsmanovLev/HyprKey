@@ -269,6 +269,28 @@ void sha3_256(const uint8_t *in, size_t inlen, uint8_t out[32]) {
     sha3_256_finalize(&ctx, out);
 }
 
+void keccak_256_finalize(sha3_256_ctx *ctx, uint8_t out[32]) {
+    memset(ctx->buf + ctx->buf_len, 0, SHA3_256_RATE - ctx->buf_len);
+    ctx->buf[ctx->buf_len] ^= 0x01; /* Keccak original padding */
+    ctx->buf[SHA3_256_RATE - 1] ^= 0x80;
+    keccak_absorb_block(ctx->s, ctx->buf, SHA3_256_RATE);
+    ctx->buf_len = 0;
+
+    for (size_t i = 0; i < 4; i++) {
+        uint64_t w = ctx->s[i];
+        for (int b = 0; b < 8; b++) {
+            out[i * 8 + b] = (uint8_t)(w >> (b * 8));
+        }
+    }
+}
+
+void keccak_256(const uint8_t *in, size_t inlen, uint8_t out[32]) {
+    sha3_256_ctx ctx;
+    sha3_256_init(&ctx);
+    sha3_256_absorb(&ctx, in, inlen);
+    keccak_256_finalize(&ctx, out);
+}
+
 /* ==================== SHA3-512 ==================== */
 void sha3_512_init(sha3_512_ctx *ctx) {
     memset(ctx->s, 0, sizeof(ctx->s));

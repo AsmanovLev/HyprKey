@@ -5,12 +5,14 @@
 #include "device_log.h"
 #include "storage_flash.h"
 #include "../pn532_nfc.h"
+#include "../satochip/satochip.h"
 #include <string.h>
 
 typedef enum {
     CCID_APPLET_OPENPGP = 0,
     CCID_APPLET_PIV,
-    CCID_APPLET_OATH
+    CCID_APPLET_OATH,
+    CCID_APPLET_SATOCHIP
 } ccid_applet_t;
 
 static ccid_applet_t s_active_applet = CCID_APPLET_OPENPGP;
@@ -21,6 +23,7 @@ void ccid_init(void) {
     openpgp_init();
     piv_init();
     oath_init();
+    satochip_init();
     s_active_applet = CCID_APPLET_OPENPGP;
 }
 
@@ -310,6 +313,10 @@ uint16_t ccid_process_message(const uint8_t *req, uint16_t req_len, uint8_t *rsp
                 } else if (aid_len >= 6 && memcmp(aid, "\xD2\x76\x00\x01\x24\x01", 6) == 0) {
                     s_active_applet = CCID_APPLET_OPENPGP;
                     dev_log(DEV_LOG_MOD_OPENPGP, DEV_LOG_SEV_INFO, DEV_LOG_EVT_PGP_SELECT, 0, 0);
+                } else if ((aid_len >= 8 && memcmp(aid, SATOCHIP_AID, 8) == 0) ||
+                           (aid_len >= 8 && memcmp(aid, SATOCHIP_AID_ALT, 8) == 0)) {
+                    s_active_applet = CCID_APPLET_SATOCHIP;
+                    dev_log(DEV_LOG_MOD_SYS, DEV_LOG_SEV_INFO, 0x5A, 0, 0);
                 }
             }
 
@@ -317,8 +324,8 @@ uint16_t ccid_process_message(const uint8_t *req, uint16_t req_len, uint8_t *rsp
             if (pn532_is_locked()) {
                 uint8_t ins = (apdu_len >= 2) ? apdu[1] : 0;
                 /* If INS is PSO (0x2A), GENERATE KEY (0x47), GENERAL AUTHENTICATE (0x87),
-                 * VERIFY (0x20), or CHANGE PIN (0x24), reject with 0x6982 */
-                if (ins == 0x2A || ins == 0x47 || ins == 0x87 || ins == 0x20 || ins == 0x24) {
+                 * VERIFY (0x20), CHANGE PIN (0x22/0x24), or SATOCHIP SIGN (0x6E), reject with 0x6982 */
+                if (ins == 0x2A || ins == 0x47 || ins == 0x87 || ins == 0x20 || ins == 0x22 || ins == 0x24 || ins == 0x6E) {
                     rsp[0] = CCID_RDR_TO_PC_DATA_BLOCK;
                     rsp[1] = 2; rsp[2] = 0; rsp[3] = 0; rsp[4] = 0;
                     rsp[5] = slot; rsp[6] = seq; rsp[7] = 0x00; rsp[8] = 0x00; rsp[9] = 0x00;
@@ -332,6 +339,8 @@ uint16_t ccid_process_message(const uint8_t *req, uint16_t req_len, uint8_t *rsp
                 apdu_rsp_len = oath_process_apdu(apdu, apdu_len, rsp + 10, max_rsp_len - 10);
             } else if (s_active_applet == CCID_APPLET_PIV) {
                 apdu_rsp_len = piv_process_apdu(apdu, apdu_len, rsp + 10, max_rsp_len - 10);
+            } else if (s_active_applet == CCID_APPLET_SATOCHIP) {
+                apdu_rsp_len = satochip_process_apdu(apdu, apdu_len, rsp + 10, max_rsp_len - 10);
             } else {
                 apdu_rsp_len = openpgp_process_apdu(apdu, apdu_len, rsp + 10, max_rsp_len - 10);
             }

@@ -50,6 +50,10 @@ void sha3_256_absorb(sha3_256_ctx *ctx, const uint8_t *in, size_t inlen);
 void sha3_256_finalize(sha3_256_ctx *ctx, uint8_t out[32]);
 void sha3_256(const uint8_t *in, size_t inlen, uint8_t out[32]);
 
+/* Keccak-256 for Ethereum / EVM / Web3 (domain byte 0x01) */
+void keccak_256_finalize(sha3_256_ctx *ctx, uint8_t out[32]);
+void keccak_256(const uint8_t *in, size_t inlen, uint8_t out[32]);
+
 void sha3_512_init(sha3_512_ctx *ctx);
 void sha3_512_absorb(sha3_512_ctx *ctx, const uint8_t *in, size_t inlen);
 void sha3_512_finalize(sha3_512_ctx *ctx, uint8_t out[64]);
