@@ -1251,8 +1251,10 @@ void SysTick_Handler(void) {
     g_uptime_ms++;
 }
 
+extern const uint32_t vector_table[];
+
 void Reset_Handler(void) {
-    (*(volatile uint32_t *)0xE000ED08UL) = 0x00026000UL; /* Relocate VTOR */
+    (*(volatile uint32_t *)0xE000ED08UL) = (uint32_t)vector_table; /* Relocate VTOR to active slot */
     uint32_t *src = &_etext;
     uint32_t *dst = &_sdata;
     while (dst < &_edata) {
