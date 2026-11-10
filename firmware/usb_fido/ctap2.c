@@ -3,22 +3,15 @@
 #include "ed25519/ed25519.h"
 #include "sha256/sha256.h"
 #include "micro_ecc/uECC.h"
+#include "storage_flash.h"
+#include "crypto_consttime.h"
 #include <string.h>
 #include <stdbool.h>
-
-static const uint8_t DEVICE_MASTER_KEY[32] = {
-    0x48, 0x79, 0x70, 0x72, 0x4B, 0x65, 0x79, 0x5F,
-    0x4D, 0x61, 0x73, 0x74, 0x65, 0x72, 0x5F, 0x53,
-    0x65, 0x63, 0x72, 0x65, 0x74, 0x5F, 0x4E, 0x52,
-    0x46, 0x35, 0x32, 0x38, 0x34, 0x30, 0x21, 0x00
-};
 
 static const uint8_t HYPRKEY_AAGUID[16] = {
     0x48, 0x59, 0x50, 0x52, 0x4B, 0x45, 0x59, 0x00,
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01
 };
-
-static uint32_t g_ctap2_counter = 1;
 
 /* ==================== CBOR Writer ==================== */
 typedef struct {
@@ -139,7 +132,12 @@ static bool cbor_r_get_header(cbor_reader_t *r, uint8_t *major, uint64_t *val) {
     return true;
 }
 
-static bool cbor_r_skip(cbor_reader_t *r) {
+#define CBOR_MAX_NESTING_DEPTH 6U
+
+static bool cbor_r_skip_bounded(cbor_reader_t *r, uint8_t depth) {
+    if (depth > CBOR_MAX_NESTING_DEPTH) {
+        return false; /* Prevent recursive stack overflow */
+    }
     uint8_t major;
     uint64_t val;
     if (!cbor_r_get_header(r, &major, &val)) return false;
@@ -147,30 +145,50 @@ static bool cbor_r_skip(cbor_reader_t *r) {
     if (major == 0 || major == 1 || major == 7) {
         return true;
     } else if (major == 2 || major == 3) {
-        if (r->pos + val > r->len) return false;
+        if (val > (uint64_t)(r->len - r->pos)) return false;
         r->pos += (size_t)val;
         return true;
     } else if (major == 4) {
+        if (val > 32) return false;
         for (uint64_t i = 0; i < val; i++) {
-            if (!cbor_r_skip(r)) return false;
+            if (!cbor_r_skip_bounded(r, depth + 1)) return false;
         }
         return true;
     } else if (major == 5) {
+        if (val > 32) return false;
         for (uint64_t i = 0; i < val; i++) {
-            if (!cbor_r_skip(r)) return false; /* key */
-            if (!cbor_r_skip(r)) return false; /* value */
+            if (!cbor_r_skip_bounded(r, depth + 1)) return false; /* key */
+            if (!cbor_r_skip_bounded(r, depth + 1)) return false; /* value */
         }
         return true;
     }
     return false;
 }
 
+static inline bool cbor_r_skip(cbor_reader_t *r) {
+    return cbor_r_skip_bounded(r, 0);
+}
+
+static bool cbor_r_get_bytes(cbor_reader_t *r, uint8_t expected_major, const uint8_t **out_ptr, size_t *out_len) {
+    uint8_t major;
+    uint64_t val;
+    if (!cbor_r_get_header(r, &major, &val) || major != expected_major) return false;
+    if (val > (uint64_t)(r->len - r->pos)) return false;
+    *out_ptr = r->data + r->pos;
+    *out_len = (size_t)val;
+    r->pos += (size_t)val;
+    return true;
+}
+
 /* ==================== Cryptographic Derivation ==================== */
 
 static void derive_cred_seed(const uint8_t rp_id_hash[32], int32_t alg, uint8_t seed_out[32]) {
+    uint8_t master_key[32];
+    storage_get_device_master_key("FIDO_CTAP2", master_key);
+
     sha256_ctx_t ctx;
     sha256_init(&ctx);
-    sha256_update(&ctx, DEVICE_MASTER_KEY, 32);
+    sha256_update(&ctx, master_key, 32);
     const char tag[] = "CTAP2_CRED_SEED";
     sha256_update(&ctx, (const uint8_t *)tag, sizeof(tag) - 1);
     uint8_t alg_bytes[4] = {
@@ -186,7 +204,7 @@ static void derive_cred_id(const uint8_t rp_id_hash[32], int32_t alg, uint8_t cr
     /* Format of 32-byte cred_id:
      * [0..3]: alg (big endian)
      * [4..7]: 'H', 'Y', 'P', 'R' (tag)
-     * [8..31]: HMAC/SHA256(DEVICE_MASTER_KEY, tag || alg || rp_id_hash)[0..24]
+     * [8..31]: HMAC/SHA256(master_key, tag || alg || rp_id_hash)[0..24]
      */
     cred_id_out[0] = (uint8_t)(alg >> 24);
     cred_id_out[1] = (uint8_t)(alg >> 16);
@@ -197,9 +215,12 @@ static void derive_cred_id(const uint8_t rp_id_hash[32], int32_t alg, uint8_t cr
     cred_id_out[6] = 'P';
     cred_id_out[7] = 'R';
 
+    uint8_t master_key[32];
+    storage_get_device_master_key("FIDO_CTAP2", master_key);
+
     sha256_ctx_t ctx;
     sha256_init(&ctx);
-    sha256_update(&ctx, DEVICE_MASTER_KEY, 32);
+    sha256_update(&ctx, master_key, 32);
     const char tag[] = "CRED_ID_MAC";
     sha256_update(&ctx, (const uint8_t *)tag, sizeof(tag) - 1);
     sha256_update(&ctx, cred_id_out, 4);
@@ -220,7 +241,7 @@ static bool verify_cred_id(const uint8_t cred_id[32], const uint8_t rp_id_hash[3
 
     uint8_t expected[32];
     derive_cred_id(rp_id_hash, alg, expected);
-    if (memcmp(cred_id, expected, 32) != 0) {
+    if (!crypto_consttime_eq(cred_id, expected, 32)) {
         return false;
     }
     *alg_out = alg;
@@ -326,11 +347,10 @@ static uint16_t handle_make_credential(const uint8_t *payload, uint16_t len, uin
 
         if (k_major == 0 && key_val == 1) {
             /* 1: clientDataHash (bstr, 32 bytes) */
-            uint8_t v_major;
-            uint64_t v_len;
-            if (cbor_r_get_header(&r, &v_major, &v_len) && v_major == 2 && v_len == 32) {
-                memcpy(client_data_hash, r.data + r.pos, 32);
-                r.pos += 32;
+            const uint8_t *cdh_ptr;
+            size_t cdh_len;
+            if (cbor_r_get_bytes(&r, 2, &cdh_ptr, &cdh_len) && cdh_len == 32) {
+                memcpy(client_data_hash, cdh_ptr, 32);
                 has_cdh = true;
             } else {
                 cbor_r_skip(&r);
@@ -341,20 +361,17 @@ static uint16_t handle_make_credential(const uint8_t *payload, uint16_t len, uin
             uint64_t rp_entries;
             if (cbor_r_get_header(&r, &v_major, &rp_entries) && v_major == 5) {
                 for (uint64_t i = 0; i < rp_entries; i++) {
-                    uint8_t rp_k_major;
-                    uint64_t rp_k_len;
-                    if (cbor_r_get_header(&r, &rp_k_major, &rp_k_len) && rp_k_major == 3) {
-                        const uint8_t *k_str = r.data + r.pos;
-                        r.pos += (size_t)rp_k_len;
+                    const uint8_t *k_str;
+                    size_t rp_k_len;
+                    if (cbor_r_get_bytes(&r, 3, &k_str, &rp_k_len)) {
                         if (rp_k_len == 2 && memcmp(k_str, "id", 2) == 0) {
-                            uint8_t id_major;
-                            uint64_t id_len;
-                            if (cbor_r_get_header(&r, &id_major, &id_len) && id_major == 3) {
+                            const uint8_t *id_str;
+                            size_t id_len;
+                            if (cbor_r_get_bytes(&r, 3, &id_str, &id_len)) {
                                 sha256_ctx_t sha;
                                 sha256_init(&sha);
-                                sha256_update(&sha, r.data + r.pos, (size_t)id_len);
+                                sha256_update(&sha, id_str, id_len);
                                 sha256_final(&sha, rp_id_hash);
-                                r.pos += (size_t)id_len;
                                 has_rp = true;
                             } else {
                                 cbor_r_skip(&r);
@@ -443,7 +460,7 @@ static uint16_t handle_make_credential(const uint8_t *payload, uint16_t len, uin
     /* Flags: UP (0x01) | AT (0x40) = 0x41 */
     cbor_w_byte(&aw, 0x41);
     /* Sign counter (4 bytes big-endian) */
-    uint32_t cnt = g_ctap2_counter++;
+    uint32_t cnt = storage_increment_sign_counter();
     cbor_w_byte(&aw, (uint8_t)(cnt >> 24));
     cbor_w_byte(&aw, (uint8_t)(cnt >> 16));
     cbor_w_byte(&aw, (uint8_t)(cnt >> 8));
@@ -547,25 +564,23 @@ static uint16_t handle_get_assertion(const uint8_t *payload, uint16_t len, uint8
 
         if (k_major == 0 && key_val == 1) {
             /* 1: rpId (text string) */
-            uint8_t id_major;
-            uint64_t id_len;
-            if (cbor_r_get_header(&r, &id_major, &id_len) && id_major == 3) {
+            const uint8_t *id_str;
+            size_t id_len;
+            if (cbor_r_get_bytes(&r, 3, &id_str, &id_len)) {
                 sha256_ctx_t sha;
                 sha256_init(&sha);
-                sha256_update(&sha, r.data + r.pos, (size_t)id_len);
+                sha256_update(&sha, id_str, id_len);
                 sha256_final(&sha, rp_id_hash);
-                r.pos += (size_t)id_len;
                 has_rp = true;
             } else {
                 cbor_r_skip(&r);
             }
         } else if (k_major == 0 && key_val == 2) {
             /* 2: clientDataHash (bstr, 32 bytes) */
-            uint8_t v_major;
-            uint64_t v_len;
-            if (cbor_r_get_header(&r, &v_major, &v_len) && v_major == 2 && v_len == 32) {
-                memcpy(client_data_hash, r.data + r.pos, 32);
-                r.pos += 32;
+            const uint8_t *cdh_ptr;
+            size_t cdh_len;
+            if (cbor_r_get_bytes(&r, 2, &cdh_ptr, &cdh_len) && cdh_len == 32) {
+                memcpy(client_data_hash, cdh_ptr, 32);
                 has_cdh = true;
             } else {
                 cbor_r_skip(&r);
@@ -580,18 +595,14 @@ static uint16_t handle_get_assertion(const uint8_t *payload, uint16_t len, uint8
                     uint64_t d_entries;
                     if (cbor_r_get_header(&r, &d_major, &d_entries) && d_major == 5) {
                         for (uint64_t d = 0; d < d_entries; d++) {
-                            uint8_t dk_major;
-                            uint64_t dk_len;
-                            if (cbor_r_get_header(&r, &dk_major, &dk_len) && dk_major == 3) {
-                                const uint8_t *k_str = r.data + r.pos;
-                                r.pos += (size_t)dk_len;
+                            const uint8_t *k_str;
+                            size_t dk_len;
+                            if (cbor_r_get_bytes(&r, 3, &k_str, &dk_len)) {
                                 if (dk_len == 2 && memcmp(k_str, "id", 2) == 0) {
-                                    uint8_t id_bstr_major;
-                                    uint64_t id_bstr_len;
-                                    if (cbor_r_get_header(&r, &id_bstr_major, &id_bstr_len) &&
-                                        id_bstr_major == 2 && id_bstr_len == 32) {
-                                        memcpy(target_cred_id, r.data + r.pos, 32);
-                                        r.pos += 32;
+                                    const uint8_t *id_bstr;
+                                    size_t id_bstr_len;
+                                    if (cbor_r_get_bytes(&r, 2, &id_bstr, &id_bstr_len) && id_bstr_len == 32) {
+                                        memcpy(target_cred_id, id_bstr, 32);
                                         has_cred_id = true;
                                     } else {
                                         cbor_r_skip(&r);
@@ -638,7 +649,7 @@ static uint16_t handle_get_assertion(const uint8_t *payload, uint16_t len, uint8
     uint8_t auth_data[37];
     memcpy(auth_data, rp_id_hash, 32);
     auth_data[32] = 0x01; /* UP = 1 */
-    uint32_t cnt = g_ctap2_counter++;
+    uint32_t cnt = storage_increment_sign_counter();
     auth_data[33] = (uint8_t)(cnt >> 24);
     auth_data[34] = (uint8_t)(cnt >> 16);
     auth_data[35] = (uint8_t)(cnt >> 8);

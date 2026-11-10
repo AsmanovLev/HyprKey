@@ -5,7 +5,8 @@ Set-Location "S:\hyprkey\firmware\stage2_bootloader"
 
 & $gcc -mcpu=cortex-m4 -mthumb -mfloat-abi=hard -mfpu=fpv4-sp-d16 -Os -Wall -Wextra `
     -ffunction-sections -fdata-sections -T "linker_stage2.ld" -nostartfiles "-Wl,--gc-sections" `
-    stage2_main.c -lgcc -o "stage2.elf"
+    -I. -I../usb_fido -I../usb_fido/sha256 `
+    stage2_main.c ../usb_fido/sha256/sha256.c -lgcc -o "stage2.elf"
 
 if ($LASTEXITCODE -ne 0) {
     Write-Error "GCC build failed for Stage-2 Bootloader"

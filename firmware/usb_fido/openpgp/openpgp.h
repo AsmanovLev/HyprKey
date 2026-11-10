@@ -14,4 +14,7 @@ uint16_t openpgp_get_atr(uint8_t *out, uint16_t max_len);
  * Returns total length of response. */
 uint16_t openpgp_process_apdu(const uint8_t *apdu, uint16_t apdu_len, uint8_t *rsp, uint16_t max_rsp_len);
 
+/* Check if Admin PIN (PW3) is currently verified */
+bool openpgp_is_pw3_verified(void);
+
 #endif /* OPENPGP_H */

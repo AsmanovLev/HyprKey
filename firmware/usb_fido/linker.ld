@@ -15,6 +15,13 @@ SECTIONS
     . = ALIGN(4);
   } > FLASH
 
+  .app_header :
+  {
+    . = ALIGN(4);
+    KEEP(*(.app_header))
+    . = ALIGN(4);
+  } > FLASH
+
   .text :
   {
     . = ALIGN(4);

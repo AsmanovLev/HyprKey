@@ -1,5 +1,7 @@
 #include <stdint.h>
 #include <stdbool.h>
+#include "sha256.h"
+#include "../usb_fido/app_header.h"
 
 /* ==================== Memory Map Definitions ==================== */
 #define STAGE2_BASE         0x00026000UL
@@ -9,20 +11,11 @@
 #define META_PAGE_ADDR      0x00058000UL
 #define USERDATA_BASE       0x00059000UL
 
-/* ==================== Metadata Structure ==================== */
-#define OTA_MAGIC_HEADER    0x48595052UL  /* 'HYPR' */
-#define OTA_FLAG_SWAP_REQ   0x00000001UL
-#define OTA_FLAG_CONFIRMED  0x00000002UL
-
-typedef struct __attribute__((packed)) {
-    uint32_t magic;         /* 'HYPR' */
-    uint32_t flags;         /* OTA_FLAG_* */
-    uint32_t image_size;    /* payload size in bytes */
-    uint32_t version;       /* semantic version / build number */
-    uint32_t boot_count;    /* trial boot attempts */
-    uint8_t  sha256[32];    /* SHA-256 digest */
-    uint32_t reserved[6];
-} ota_meta_t;
+/* ==================== 4-Byte Append-Only Metadata Log ==================== */
+/* Format: [slot: 8 bits | state: 8 bits | version_counter: 16 bits] */
+#define OTA_LOG_GET_SLOT(entry)  ((uint8_t)((entry) & 0xFF))
+#define OTA_LOG_GET_STATE(entry) ((uint8_t)(((entry) >> 8) & 0xFF))
+#define OTA_LOG_GET_VER(entry)   ((uint16_t)(((entry) >> 16) & 0xFFFF))
 
 /* ==================== Hardware Registers ==================== */
 #define SCB_VTOR            (*(volatile uint32_t *)0xE000ED08UL)
@@ -30,37 +23,24 @@ typedef struct __attribute__((packed)) {
 #define NRF_POWER_GPREGRET  (*(volatile uint32_t *)0x4000051CUL)
 #define DFU_MAGIC_UF2_RESET 0x57
 
-#define NVMC_READY          (*(volatile uint32_t *)0x4001E400UL)
-#define NVMC_CONFIG         (*(volatile uint32_t *)0x4001E504UL)
-#define NVMC_ERASEPAGE      (*(volatile uint32_t *)0x4001E508UL)
-
 #define P0_DIRSET           (*(volatile uint32_t *)0x50000518UL)
 #define P0_OUTSET           (*(volatile uint32_t *)0x50000508UL)
 #define P0_OUTCLR           (*(volatile uint32_t *)0x5000050CUL)
 #define PIN_LED             15
 
-/* ==================== Flash Controller Primitives ==================== */
-static inline void nvmc_wait(void) {
-    while (NVMC_READY == 0);
-}
-
-static void nvmc_erase_page(uint32_t addr) {
-    nvmc_wait();
-    NVMC_CONFIG = 0x02; /* Een = Erase enable */
-    NVMC_ERASEPAGE = addr;
-    nvmc_wait();
-    NVMC_CONFIG = 0x00; /* Ren = Read-only */
-}
-
-static void nvmc_write_word(uint32_t addr, uint32_t data) {
-    nvmc_wait();
-    NVMC_CONFIG = 0x01; /* Wen = Write enable */
-    *(volatile uint32_t *)addr = data;
-    nvmc_wait();
-    NVMC_CONFIG = 0x00; /* Ren = Read-only */
-}
-
 /* ==================== Validation & Execution ==================== */
+static uint32_t ota_meta_read_active(void) {
+    const uint32_t *log = (const uint32_t *)META_PAGE_ADDR;
+    uint32_t last_entry = 0xFFFFFFFFUL;
+    for (uint32_t i = 0; i < 1024; i++) {
+        if (log[i] == 0xFFFFFFFFUL) {
+            break;
+        }
+        last_entry = log[i];
+    }
+    return last_entry;
+}
+
 static bool is_valid_image(uint32_t base) {
     uint32_t sp = *(volatile uint32_t *)base;
     uint32_t pc = *(volatile uint32_t *)(base + 4);
@@ -72,6 +52,25 @@ static bool is_valid_image(uint32_t base) {
 
     /* Reset handler must be Thumb address inside the slot */
     if ((pc & 1) == 0 || pc < base || pc >= (base + SLOT_SIZE)) {
+        return false;
+    }
+
+    /* HyprKey application image must have valid header magic */
+    const app_header_t *hdr = (const app_header_t *)(base + 0x40);
+    if (hdr->magic != APP_HEADER_MAGIC) {
+        return false;
+    }
+
+    /* Verify payload SHA-256 integrity against stamped header */
+    if (hdr->image_size > 0x80 && hdr->image_size <= SLOT_SIZE) {
+        uint8_t actual_hash[32];
+        sha256_hash((const uint8_t *)(base + 0x80), hdr->image_size - 0x80, actual_hash);
+        for (int i = 0; i < 32; i++) {
+            if (actual_hash[i] != hdr->sha256[i]) {
+                return false; /* Payload hash mismatch! */
+            }
+        }
+    } else {
         return false;
     }
 
@@ -106,58 +105,26 @@ int main(void) {
     P0_DIRSET = (1UL << PIN_LED);
     P0_OUTSET = (1UL << PIN_LED); /* LED off */
 
-    /* 3. Check OTA Metadata */
-    const ota_meta_t *meta = (const ota_meta_t *)META_PAGE_ADDR;
+    /* 3. Read active entry from 4-byte append-only log */
+    uint32_t entry = ota_meta_read_active();
+    uint8_t active_slot = (entry == 0xFFFFFFFFUL) ? 0 : OTA_LOG_GET_SLOT(entry);
 
-    if (meta->magic == OTA_MAGIC_HEADER && (meta->flags & OTA_FLAG_SWAP_REQ)) {
-        /* Slot B has a verified update waiting to be applied */
-        if (is_valid_image(SLOT_B_BASE)) {
-            /* Quick blink to indicate stage-2 firmware swap */
-            P0_OUTCLR = (1UL << PIN_LED);
+    /* 4. Boot Target Selection */
+    uint32_t primary_target = (active_slot == 1) ? SLOT_B_BASE : SLOT_A_BASE;
+    uint32_t fallback_target = (active_slot == 1) ? SLOT_A_BASE : SLOT_B_BASE;
 
-            /* Erase Slot A (24 pages of 4 KB = 96 KB) */
-            uint32_t copy_size = meta->image_size;
-            if (copy_size == 0 || copy_size > SLOT_SIZE) {
-                copy_size = SLOT_SIZE;
-            }
-
-            for (uint32_t p = 0; p < copy_size; p += 4096) {
-                nvmc_erase_page(SLOT_A_BASE + p);
-            }
-
-            /* Copy Slot B -> Slot A in 32-bit words */
-            uint32_t words = (copy_size + 3) / 4;
-            const uint32_t *src = (const uint32_t *)SLOT_B_BASE;
-            for (uint32_t i = 0; i < words; i++) {
-                nvmc_write_word(SLOT_A_BASE + (i * 4), src[i]);
-            }
-
-            /* Update Metadata: mark confirmed */
-            nvmc_erase_page(META_PAGE_ADDR);
-            ota_meta_t updated_meta = *meta;
-            updated_meta.flags = OTA_FLAG_CONFIRMED;
-            updated_meta.boot_count = 0;
-
-            const uint32_t *mwords = (const uint32_t *)&updated_meta;
-            for (uint32_t i = 0; i < (sizeof(ota_meta_t) / 4); i++) {
-                nvmc_write_word(META_PAGE_ADDR + (i * 4), mwords[i]);
-            }
-
-            P0_OUTSET = (1UL << PIN_LED);
-        }
-    }
-
-    /* 4. Boot Selection */
-    if (is_valid_image(SLOT_A_BASE)) {
-        boot_target(SLOT_A_BASE);
-    } else if (is_valid_image(SLOT_B_BASE)) {
-        boot_target(SLOT_B_BASE);
+    if (is_valid_image(primary_target)) {
+        boot_target(primary_target);
+    } else if (is_valid_image(fallback_target)) {
+        /* Primary slot corrupted -> Auto-fallback to other slot! */
+        boot_target(fallback_target);
     } else {
-        /* No valid application found: emergency fallback to UF2 bootloader */
+        /* Both slots invalid -> Emergency bootloader */
         reboot_to_uf2();
     }
 
     while (1);
+    return 0;
 }
 
 /* ==================== Startup Vector Table ==================== */

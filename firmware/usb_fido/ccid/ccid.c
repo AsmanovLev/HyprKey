@@ -131,9 +131,23 @@ uint16_t ccid_process_message(const uint8_t *req, uint16_t req_len, uint8_t *rsp
                 return 10 + apdu_rsp_len;
             }
 
-            /* Intercept Vendor APDU for DFU Bootloader Reset (FF FD 42 00 or FF FE 00 00) */
+            /* Intercept Vendor APDU for DFU Bootloader Reset (FF FD 42 00 or FF FE 00 00)
+             * Audit Finding 1.2: Enforce Admin PIN (PW3) authorization before resetting to DFU */
             if (apdu_len >= 4 && ((apdu[0] == 0xFF && apdu[1] == 0xFD && apdu[2] == 0x42) ||
                                   (apdu[0] == 0xFF && apdu[1] == 0xFE))) {
+                if (!openpgp_is_pw3_verified()) {
+                    dev_log(DEV_LOG_MOD_SYS, DEV_LOG_SEV_WARN, 0xDE, 0, 0);
+                    rsp[0] = CCID_RDR_TO_PC_DATA_BLOCK;
+                    rsp[1] = 2; rsp[2] = 0; rsp[3] = 0; rsp[4] = 0;
+                    rsp[5] = slot;
+                    rsp[6] = seq;
+                    rsp[7] = 0x00;
+                    rsp[8] = 0x00;
+                    rsp[9] = 0x00;
+                    rsp[10] = 0x69; /* SW1 = 0x69 */
+                    rsp[11] = 0x82; /* SW2 = 0x82: Security status not satisfied */
+                    return 12;
+                }
                 dev_log(DEV_LOG_MOD_SYS, DEV_LOG_SEV_WARN, 0xDF, 0, 0);
                 g_dfu_reset_pending = 1;
                 rsp[0] = CCID_RDR_TO_PC_DATA_BLOCK;

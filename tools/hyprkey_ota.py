@@ -12,24 +12,10 @@ import time
 import hashlib
 import smartcard.System as sc
 
-BIN_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "firmware", "usb_fido", "usb_fido.bin")
+FW_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "firmware", "usb_fido")
 CHUNK_SIZE = 220
 
 def perform_ota():
-    if not os.path.exists(BIN_PATH):
-        print(f"Error: Firmware binary not found at {BIN_PATH}")
-        sys.exit(1)
-
-    with open(BIN_PATH, "rb") as f:
-        fw_data = f.read()
-
-    total_len = len(fw_data)
-    fw_sha256 = hashlib.sha256(fw_data).digest()
-
-    print(f"Firmware binary: {BIN_PATH}")
-    print(f"Size: {total_len} bytes (~{total_len/1024:.1f} KB)")
-    print(f"SHA-256: {fw_sha256.hex()}")
-
     readers = [r for r in sc.readers() if "hyprkey" in str(r).lower()]
     if not readers:
         print("Error: HyprKey CCID reader not detected!")
@@ -42,6 +28,19 @@ def perform_ota():
 
     t0 = time.perf_counter()
 
+    # Step 0: Authenticate Admin PIN (OpenPGP PW3)
+    admin_pin = sys.argv[1] if len(sys.argv) > 1 else "12345678"
+    print(f"\n0. Authenticating Admin PIN (PW3)...")
+    # SELECT OpenPGP Card Applet
+    resp, sw1, sw2 = conn.transmit([0x00, 0xA4, 0x04, 0x00, 0x06, 0xD2, 0x76, 0x00, 0x01, 0x24, 0x01])
+    # VERIFY PW3 (Admin PIN)
+    pin_bytes = list(admin_pin.encode("ascii"))
+    resp, sw1, sw2 = conn.transmit([0x00, 0x20, 0x00, 0x83, len(pin_bytes)] + pin_bytes)
+    if (sw1, sw2) != (0x90, 0x00):
+        print(f"Error: Admin PIN verification failed! SW={sw1:02X}{sw2:02X}")
+        sys.exit(1)
+    print("   Admin PIN (PW3) successfully verified!")
+
     # Step 1: Begin OTA Session
     print("\n1. Initializing OTA Session (erasing inactive slot)...")
     t_erase_start = time.perf_counter()
@@ -52,11 +51,33 @@ def perform_ota():
         print(f"Error starting OTA session: SW={sw1:02X}{sw2:02X}, resp={resp}")
         sys.exit(1)
 
-    cur_slot = "Slot A" if resp[0] == 0 else "Slot B"
-    tgt_slot = "Slot A" if resp[1] == 0 else "Slot B"
+    cur_slot_id = resp[0]
+    tgt_slot_id = resp[1]
+    cur_slot = "Slot A" if cur_slot_id == 0 else "Slot B"
+    tgt_slot = "Slot A" if tgt_slot_id == 0 else "Slot B"
     print(f"   Active Running Slot: {cur_slot}")
     print(f"   Target Inactive Slot: {tgt_slot}")
     print(f"   Target slot erased in: {t_erase*1000:.1f} ms")
+
+    # Select target-specific binary (linked for 0x00028000 or 0x00040000)
+    slot_bin_name = "usb_fido_slot_b.bin" if tgt_slot_id == 1 else "usb_fido_slot_a.bin"
+    target_bin_path = os.path.join(FW_DIR, slot_bin_name)
+    if not os.path.exists(target_bin_path):
+        target_bin_path = os.path.join(FW_DIR, "usb_fido.bin")
+
+    if not os.path.exists(target_bin_path):
+        print(f"Error: Target binary not found at {target_bin_path}")
+        sys.exit(1)
+
+    with open(target_bin_path, "rb") as f:
+        fw_data = f.read()
+
+    total_len = len(fw_data)
+    fw_sha256 = hashlib.sha256(fw_data).digest()
+
+    print(f"   Selected Image: {slot_bin_name}")
+    print(f"   Size: {total_len} bytes (~{total_len/1024:.1f} KB)")
+    print(f"   SHA-256: {fw_sha256.hex()}")
 
     # Step 2: Stream Chunks
     print(f"\n2. Streaming {total_len} bytes in {CHUNK_SIZE}-byte chunks over USB CCID...")

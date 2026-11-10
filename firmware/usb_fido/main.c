@@ -7,6 +7,18 @@
 #include "openpgp/openpgp.h"
 #include "oath/oath.h"
 #include "device_log.h"
+#include "app_header.h"
+
+__attribute__((section(".app_header"), used))
+const app_header_t g_app_header = {
+    .magic            = APP_HEADER_MAGIC,
+    .version          = (1 << 24) | (0 << 16) | (0 << 8) | 1, /* v1.0.0.1 */
+    .security_counter = 1,
+    .image_size       = 0,
+    .sha256           = {0},
+    .git_commit       = "95f2032",
+    .build_date       = "20261110",
+};
 
 /* ==================== nRF52840 Registers ==================== */
 #define P0_BASE               0x50000000UL
@@ -669,12 +681,6 @@ static void handle_complete_ctaphid_msg(uint32_t cid, uint8_t cmd, const uint8_t
         uart_puts("\r\n");
 
         send_ctaphid_response(cid, CTAPHID_CMD_CBOR, m_fido_tx_buf, resp_len);
-    } else if (cmd == 0x70) {
-        /* CTAPHID Vendor Command: Trigger Keyboard Typing */
-        uart_puts("[VENDOR] Triggering Keyboard OTP typing...\r\n");
-        kbd_type_string("hyprkey-sec-k3y-otp-2026\n");
-        uint8_t ack = 0x00;
-        send_ctaphid_response(cid, 0x70, &ack, 1);
     } else if (cmd == 0x71) {
         /* CTAPHID Vendor Command: OATH APDU Tunnel (for WebHID / Browser) */
         uart_puts("[OATH-TUNNEL] Processing APDU via CTAPHID...\r\n");
@@ -1248,6 +1254,9 @@ extern uint32_t _etext, _sdata, _edata, _sbss, _ebss;
 
 void HardFault_Handler(void) {
     uart_puts("\r\n!!! HARDFAULT !!!\r\n");
+    /* Emergency fallback: reboot into UF2 bootloader so token is never permanently stuck */
+    (*(volatile uint32_t *)0x4000051CUL) = 0x57; /* NRF_POWER->GPREGRET = DFU_MAGIC_UF2_RESET */
+    (*(volatile uint32_t *)0xE000ED0CUL) = 0x05FA0004UL; /* SCB->AIRCR = SYSRESETREQ */
     while (1);
 }
 

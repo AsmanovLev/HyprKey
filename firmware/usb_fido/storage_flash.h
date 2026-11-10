@@ -41,6 +41,20 @@ bool ota_staging_erase(void);
 bool ota_staging_write_chunk(uint32_t offset, const void *data, size_t len);
 bool ota_staging_finalize_and_reboot(uint32_t image_size, uint32_t crc32, uint32_t version);
 
+/* ==================== Cryptographic Hardware Root Secrets ==================== */
+void storage_get_device_master_key(const char *domain, uint8_t key_out[32]);
+
+/* ==================== Persistent State & Monotonic Counters ==================== */
+uint32_t storage_get_sign_counter(void);
+uint32_t storage_increment_sign_counter(void);
+
+#define PIN_TYPE_PGP_PW1    0
+#define PIN_TYPE_PGP_PW3    1
+#define PIN_TYPE_PIV_PIN    2
+
+uint8_t storage_get_pin_retries(uint8_t pin_type);
+void storage_set_pin_retries(uint8_t pin_type, uint8_t retries);
+
 /* ==================== High-level Autonomous OTA API ==================== */
 uint8_t ota_get_current_slot(void);
 uint8_t ota_get_target_slot(void);

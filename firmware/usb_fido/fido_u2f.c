@@ -2,6 +2,8 @@
 #include "attestation.h"
 #include "sha256.h"
 #include "uECC.h"
+#include "storage_flash.h"
+#include "crypto_consttime.h"
 #include <string.h>
 
 #define RNG_BASE 0x4000D000UL
@@ -9,15 +11,7 @@
 #define RNG_TASKS_STOP    (*(volatile uint32_t *)(RNG_BASE + 0x004))
 #define RNG_EVENTS_VALRDY (*(volatile uint32_t *)(RNG_BASE + 0x100))
 #define RNG_VALUE         (*(volatile uint32_t *)(RNG_BASE + 0x508))
-
-static const uint8_t DEVICE_MASTER_KEY[32] = {
-    0x48, 0x79, 0x70, 0x72, 0x4B, 0x65, 0x79, 0x5F,
-    0x4D, 0x61, 0x73, 0x74, 0x65, 0x72, 0x5F, 0x53,
-    0x65, 0x63, 0x72, 0x65, 0x74, 0x5F, 0x4E, 0x52,
-    0x46, 0x35, 0x32, 0x38, 0x34, 0x30, 0x21, 0x00
-};
-
-static uint32_t g_fido_counter = 1;
+#define NRF_RNG_CONFIG    (*(volatile uint32_t *)(RNG_BASE + 0x504))
 
 /* Multi-chunk chaining buffer for ISO 7816-4 GET RESPONSE (61 XX) */
 static uint8_t g_pending_rsp[800];
@@ -25,14 +19,19 @@ static uint16_t g_pending_len = 0;
 static uint16_t g_pending_offset = 0;
 
 static int nrf_trng(uint8_t *dest, unsigned size) {
-    RNG_TASKS_START = 1;
+    NRF_RNG_CONFIG = 1UL; /* Enable Digital Error Correction (Bias elimination) */
+    RNG_TASKS_START = 1UL;
     while (size--) {
-        RNG_EVENTS_VALRDY = 0;
-        uint32_t timeout = 50000;
+        RNG_EVENTS_VALRDY = 0UL;
+        uint32_t timeout = 100000UL;
         while (!RNG_EVENTS_VALRDY && --timeout);
+        if (timeout == 0UL) {
+            RNG_TASKS_STOP = 1UL;
+            return 0; /* RNG failure */
+        }
         *dest++ = (uint8_t)RNG_VALUE;
     }
-    RNG_TASKS_STOP = 1;
+    RNG_TASKS_STOP = 1UL;
     return 1;
 }
 
@@ -74,9 +73,12 @@ static uint16_t der_encode_sig(const uint8_t *r, const uint8_t *s, uint8_t *out)
 }
 
 static void derive_user_key(const uint8_t app_param[32], uint8_t priv_key[32], uint8_t pub_key_uncomp[65]) {
+    uint8_t master_key[32];
+    storage_get_device_master_key("FIDO_U2F", master_key);
+
     sha256_ctx_t ctx;
     sha256_init(&ctx);
-    sha256_update(&ctx, DEVICE_MASTER_KEY, sizeof(DEVICE_MASTER_KEY));
+    sha256_update(&ctx, master_key, sizeof(master_key));
     sha256_update(&ctx, app_param, 32);
     sha256_final(&ctx, priv_key);
 
@@ -87,11 +89,14 @@ static void derive_user_key(const uint8_t app_param[32], uint8_t priv_key[32], u
 }
 
 static void derive_key_handle(const uint8_t app_param[32], uint8_t key_handle[32]) {
+    uint8_t master_key[32];
+    storage_get_device_master_key("FIDO_U2F", master_key);
+
     sha256_ctx_t ctx;
     sha256_init(&ctx);
     uint8_t tag[] = "HYPRKEY_KEY_HANDLE";
     sha256_update(&ctx, tag, sizeof(tag) - 1);
-    sha256_update(&ctx, DEVICE_MASTER_KEY, sizeof(DEVICE_MASTER_KEY));
+    sha256_update(&ctx, master_key, sizeof(master_key));
     sha256_update(&ctx, app_param, 32);
     sha256_final(&ctx, key_handle);
 }
@@ -214,7 +219,7 @@ int fido_process_apdu(const uint8_t *req, uint16_t req_len, uint8_t *rsp, uint16
 
         uint8_t expected_kh[32];
         derive_key_handle(app_param, expected_kh);
-        if (kh_len != 32 || memcmp(key_handle, expected_kh, 32) != 0) {
+        if (kh_len != 32 || !crypto_consttime_eq(key_handle, expected_kh, 32)) {
             /* Key handle not recognized */
             rsp[0] = 0x6A; rsp[1] = 0x80;
             return 2;
@@ -230,7 +235,7 @@ int fido_process_apdu(const uint8_t *req, uint16_t req_len, uint8_t *rsp, uint16
         uint8_t user_priv[32], user_pub[65];
         derive_user_key(app_param, user_priv, user_pub);
 
-        uint32_t cur_counter = g_fido_counter++;
+        uint32_t cur_counter = storage_increment_sign_counter();
         uint8_t up_flags = 0x01;
 
         sha256_ctx_t s_ctx;

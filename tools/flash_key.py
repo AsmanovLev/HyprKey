@@ -31,7 +31,7 @@ def find_nicenano_drive():
                 pass
     return None
 
-def trigger_dfu_via_ccid():
+def trigger_dfu_via_ccid(admin_pin="12345678"):
     try:
         import smartcard.System as sc
         readers = [r for r in sc.readers() if "hyprkey" in str(r).lower()]
@@ -42,11 +42,16 @@ def trigger_dfu_via_ccid():
         print(f"Connecting to {reader}...")
         conn = reader.createConnection()
         conn.connect()
+        # SELECT OpenPGP Card Applet
+        conn.transmit([0x00, 0xA4, 0x04, 0x00, 0x06, 0xD2, 0x76, 0x00, 0x01, 0x24, 0x01])
+        # VERIFY PW3 (Admin PIN)
+        pin_bytes = list(admin_pin.encode("ascii"))
+        conn.transmit([0x00, 0x20, 0x00, 0x83, len(pin_bytes)] + pin_bytes)
         # APDU: CLA=0xFF, INS=0xFD, P1=0x42 (Reboot to DFU)
         data, sw1, sw2 = conn.transmit([0xFF, 0xFD, 0x42, 0x00, 0x00])
         print(f"Sent Reboot-to-DFU APDU -> SW={sw1:02X}{sw2:02X}")
         conn.disconnect()
-        return True
+        return (sw1, sw2) == (0x90, 0x00)
     except Exception as e:
         print(f"CCID trigger exception: {e}")
         return False

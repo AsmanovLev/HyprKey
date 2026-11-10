@@ -3,15 +3,9 @@
 #include "sha256/sha256.h"
 #include "fips202.h"
 #include "mlkem.h"
+#include "storage_flash.h"
+#include "crypto_consttime.h"
 #include <string.h>
-
-/* Master secret for deterministic key derivation */
-static const uint8_t OPENPGP_MASTER_KEY[32] = {
-    0x48, 0x79, 0x70, 0x72, 0x4B, 0x65, 0x79, 0x5F,
-    0x4F, 0x70, 0x65, 0x6E, 0x50, 0x47, 0x50, 0x5F,
-    0x53, 0x65, 0x63, 0x72, 0x65, 0x74, 0x5F, 0x4E,
-    0x52, 0x46, 0x35, 0x32, 0x38, 0x34, 0x30, 0x01
-};
 
 /* AID: D2 76 00 01 24 01 (OpenPGP) 03 04 (v3.4) 00 01 (Manuf) 00 00 00 01 (Serial) 00 00 */
 static const uint8_t s_openpgp_aid[16] = {
@@ -223,9 +217,12 @@ static void compute_v4_fingerprint(uint8_t alg, uint32_t ctime, const uint8_t pu
 
 /* Initialize keys deterministically from master secret */
 static void init_key(openpgp_key_t *k, const char *role_tag, uint8_t alg, uint32_t ctime) {
+    uint8_t master_key[32];
+    storage_get_device_master_key("OPENPGP", master_key);
+
     sha256_ctx_t ctx;
     sha256_init(&ctx);
-    sha256_update(&ctx, OPENPGP_MASTER_KEY, 32);
+    sha256_update(&ctx, master_key, 32);
     sha256_update(&ctx, (const uint8_t *)role_tag, strlen(role_tag));
     sha256_final(&ctx, k->privkey);
 
@@ -248,20 +245,27 @@ void openpgp_init(void) {
     init_key(&s_key_aut, "OPENPGP_AUTH_KEY", 0x13, default_ctime);
 
     /* Derive deterministic ML-KEM-768 keypair */
+    uint8_t master_key[32];
+    storage_get_device_master_key("OPENPGP", master_key);
+
     uint8_t d[32], z[32];
     sha3_256_ctx hctx;
     sha3_256_init(&hctx);
-    sha3_256_absorb(&hctx, OPENPGP_MASTER_KEY, 32);
+    sha3_256_absorb(&hctx, master_key, 32);
     sha3_256_absorb(&hctx, (const uint8_t *)"MLKEM768_D", 10);
     sha3_256_finalize(&hctx, d);
 
     sha3_256_init(&hctx);
-    sha3_256_absorb(&hctx, OPENPGP_MASTER_KEY, 32);
+    sha3_256_absorb(&hctx, master_key, 32);
     sha3_256_absorb(&hctx, (const uint8_t *)"MLKEM768_Z", 10);
     sha3_256_finalize(&hctx, z);
 
     mlkem768_keygen_internal(s_mlkem768_pk, s_mlkem768_sk, d, z);
     s_mlkem768_valid = true;
+
+    /* Persistent PIN retry counters from Flash (Audit Finding 2.1) */
+    s_pw1_tries = storage_get_pin_retries(PIN_TYPE_PGP_PW1);
+    s_pw3_tries = storage_get_pin_retries(PIN_TYPE_PGP_PW3);
 
     s_pw1_sign_verified = false;
     s_pw1_other_verified = false;
@@ -401,22 +405,26 @@ uint16_t openpgp_process_apdu(const uint8_t *apdu, uint16_t apdu_len, uint8_t *r
 
     (void)cla;
 
-    /* Parse Lc and Data pointer (Short and Extended APDUs) */
+    /* Parse Lc and Data pointer (Short and Extended APDUs) with strict length validation */
     uint16_t lc = 0;
     const uint8_t *data = NULL;
     if (apdu_len > 4) {
         if (apdu[4] == 0x00 && apdu_len >= 7) {
             /* Extended APDU: [CLA INS P1 P2 00 B1 B2 ...DATA...] */
             lc = ((uint16_t)apdu[5] << 8) | apdu[6];
-            if (lc > 0 && apdu_len >= 7 + lc) {
-                data = &apdu[7];
+            if (apdu_len < (uint16_t)(7 + lc)) {
+                rsp[0] = 0x67; rsp[1] = 0x00; /* SW_WRONG_LENGTH */
+                return 2;
             }
+            data = (lc > 0) ? &apdu[7] : NULL;
         } else {
             /* Short APDU: [CLA INS P1 P2 Lc ...DATA...] */
             lc = apdu[4];
-            if (lc > 0 && apdu_len >= 5 + lc) {
-                data = &apdu[5];
+            if (apdu_len < (uint16_t)(5 + lc)) {
+                rsp[0] = 0x67; rsp[1] = 0x00; /* SW_WRONG_LENGTH */
+                return 2;
             }
+            data = (lc > 0) ? &apdu[5] : NULL;
         }
     }
 
@@ -549,13 +557,15 @@ uint16_t openpgp_process_apdu(const uint8_t *apdu, uint16_t apdu_len, uint8_t *r
                 return 2;
             }
 
-            if (lc == s_pw1_len && memcmp(data, s_pw1, lc) == 0) {
+            if (data != NULL && lc == s_pw1_len && crypto_consttime_eq(data, s_pw1, lc)) {
                 s_pw1_tries = 3;
+                storage_set_pin_retries(PIN_TYPE_PGP_PW1, s_pw1_tries);
                 if (p2 == 0x81) s_pw1_sign_verified = true;
                 if (p2 == 0x82) s_pw1_other_verified = true;
                 rsp[0] = 0x90; rsp[1] = 0x00;
             } else {
                 if (s_pw1_tries > 0) s_pw1_tries--;
+                storage_set_pin_retries(PIN_TYPE_PGP_PW1, s_pw1_tries);
                 rsp[0] = 0x63; rsp[1] = (uint8_t)(0xC0 | s_pw1_tries);
             }
             return 2;
@@ -575,12 +585,14 @@ uint16_t openpgp_process_apdu(const uint8_t *apdu, uint16_t apdu_len, uint8_t *r
                 return 2;
             }
 
-            if (lc == s_pw3_len && memcmp(data, s_pw3, lc) == 0) {
+            if (data != NULL && lc == s_pw3_len && crypto_consttime_eq(data, s_pw3, lc)) {
                 s_pw3_tries = 3;
+                storage_set_pin_retries(PIN_TYPE_PGP_PW3, s_pw3_tries);
                 s_pw3_verified = true;
                 rsp[0] = 0x90; rsp[1] = 0x00;
             } else {
                 if (s_pw3_tries > 0) s_pw3_tries--;
+                storage_set_pin_retries(PIN_TYPE_PGP_PW3, s_pw3_tries);
                 rsp[0] = 0x63; rsp[1] = (uint8_t)(0xC0 | s_pw3_tries);
             }
             return 2;
@@ -787,4 +799,8 @@ uint16_t openpgp_process_apdu(const uint8_t *apdu, uint16_t apdu_len, uint8_t *r
     /* Unsupported instruction */
     rsp[0] = 0x6D; rsp[1] = 0x00;
     return 2;
+}
+
+bool openpgp_is_pw3_verified(void) {
+    return s_pw3_verified;
 }

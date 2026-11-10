@@ -2,6 +2,8 @@
 #include "micro_ecc/uECC.h"
 #include "sha256/sha256.h"
 #include "ed25519/ed25519.h"
+#include "storage_flash.h"
+#include "crypto_consttime.h"
 #include <string.h>
 
 #define PIV_TAG_CHUID     0x5FC102
@@ -15,13 +17,6 @@
 /* PIV AID: A0 00 00 03 08 00 00 10 00 01 00 */
 static const uint8_t s_piv_aid[11] = {
     0xA0, 0x00, 0x00, 0x03, 0x08, 0x00, 0x00, 0x10, 0x00, 0x01, 0x00
-};
-
-static const uint8_t PIV_MASTER_KEY[32] = {
-    0x48, 0x79, 0x70, 0x72, 0x4B, 0x65, 0x79, 0x5F,
-    0x50, 0x49, 0x56, 0x5F, 0x53, 0x65, 0x63, 0x72,
-    0x65, 0x74, 0x5F, 0x4E, 0x52, 0x46, 0x35, 0x32,
-    0x38, 0x34, 0x30, 0x5F, 0x30, 0x31, 0x00, 0x02
 };
 
 /* CHUID (Card Holder Unique Identifier) */
@@ -237,9 +232,12 @@ static void generate_self_signed_cert(piv_key_t *k, uint8_t slot_id, const char 
 }
 
 static void init_piv_key(piv_key_t *k, const char *role_tag, uint8_t slot_id, const char *cn, uint8_t key_usage) {
+    uint8_t master_key[32];
+    storage_get_device_master_key("PIV", master_key);
+
     sha256_ctx_t ctx;
     sha256_init(&ctx);
-    sha256_update(&ctx, PIV_MASTER_KEY, 32);
+    sha256_update(&ctx, master_key, 32);
     sha256_update(&ctx, (const uint8_t *)role_tag, strlen(role_tag));
     sha256_final(&ctx, k->privkey);
     k->privkey[0] &= 0x7F;
@@ -257,7 +255,7 @@ void piv_init(void) {
     init_piv_key(&s_piv_key_9e, "PIV_CARD_KEY_9E", 0x9E, "hyprkey PIV Card Authentication", 0x80); /* digitalSignature */
 
     s_piv_pin_verified = false;
-    s_piv_pin_tries = 3;
+    s_piv_pin_tries = storage_get_pin_retries(PIN_TYPE_PIV_PIN);
 }
 
 /* ==================== PIV APDU Processing ==================== */
@@ -277,10 +275,18 @@ uint16_t piv_process_apdu(const uint8_t *apdu, uint16_t apdu_len, uint8_t *rsp, 
     if (apdu_len > 4) {
         if (apdu[4] == 0x00 && apdu_len >= 7) {
             lc = ((uint16_t)apdu[5] << 8) | apdu[6];
-            if (lc > 0 && apdu_len >= 7 + lc) data = &apdu[7];
+            if (apdu_len < (uint16_t)(7 + lc)) {
+                rsp[0] = 0x67; rsp[1] = 0x00;
+                return 2;
+            }
+            data = (lc > 0) ? &apdu[7] : NULL;
         } else {
             lc = apdu[4];
-            if (lc > 0 && apdu_len >= 5 + lc) data = &apdu[5];
+            if (apdu_len < (uint16_t)(5 + lc)) {
+                rsp[0] = 0x67; rsp[1] = 0x00;
+                return 2;
+            }
+            data = (lc > 0) ? &apdu[5] : NULL;
         }
     }
 
@@ -288,7 +294,7 @@ uint16_t piv_process_apdu(const uint8_t *apdu, uint16_t apdu_len, uint8_t *rsp, 
     if (ins == 0xA4) {
         if (p1 == 0x04 && p2 == 0x00) {
             /* Accept PIV AID (11 bytes or prefix 9 bytes) */
-            if (lc >= 9 && memcmp(data, s_piv_aid, 9) == 0) {
+            if (data != NULL && lc >= 9 && memcmp(data, s_piv_aid, 9) == 0) {
                 /* Return Application Property Template 0x7E */
                 uint16_t idx = 0;
                 rsp[idx++] = 0x7E;
@@ -323,20 +329,25 @@ uint16_t piv_process_apdu(const uint8_t *apdu, uint16_t apdu_len, uint8_t *rsp, 
                 return 2;
             }
 
-            /* Match 6-8 bytes */
+            /* Match 6-8 bytes with 0xFF padding (FIPS 201 compliant constant-time) */
             bool match = false;
-            if (lc == 8 && memcmp(data, s_piv_pin, 8) == 0) {
-                match = true;
-            } else if (lc == 6 && memcmp(data, s_piv_pin, 6) == 0) {
-                match = true;
+            uint8_t padded_input[8];
+            memset(padded_input, 0xFF, sizeof(padded_input));
+            if (lc >= 6 && lc <= 8 && data != NULL) {
+                memcpy(padded_input, data, lc);
+                if (crypto_consttime_eq(padded_input, s_piv_pin, 8)) {
+                    match = true;
+                }
             }
 
             if (match) {
                 s_piv_pin_tries = 3;
+                storage_set_pin_retries(PIN_TYPE_PIV_PIN, s_piv_pin_tries);
                 s_piv_pin_verified = true;
                 rsp[0] = 0x90; rsp[1] = 0x00;
             } else {
                 if (s_piv_pin_tries > 0) s_piv_pin_tries--;
+                storage_set_pin_retries(PIN_TYPE_PIV_PIN, s_piv_pin_tries);
                 s_piv_pin_verified = false;
                 rsp[0] = 0x63; rsp[1] = (uint8_t)(0xC0 | s_piv_pin_tries);
             }
@@ -348,11 +359,15 @@ uint16_t piv_process_apdu(const uint8_t *apdu, uint16_t apdu_len, uint8_t *rsp, 
 
     /* 3. CHANGE REFERENCE DATA (0x24) */
     if (ins == 0x24 && p2 == 0x80) {
-        if (lc >= 16) {
+        if (lc >= 16 && data != NULL) {
             /* Old PIN (8) + New PIN (8) */
-            if (memcmp(data, s_piv_pin, 8) == 0 || (memcmp(data, s_piv_pin, 6) == 0 && data[6] == 0xFF)) {
+            uint8_t padded_old[8];
+            memset(padded_old, 0xFF, sizeof(padded_old));
+            memcpy(padded_old, data, 8);
+            if (crypto_consttime_eq(padded_old, s_piv_pin, 8)) {
                 memcpy(s_piv_pin, data + 8, 8);
                 s_piv_pin_tries = 3;
+                storage_set_pin_retries(PIN_TYPE_PIV_PIN, 3);
                 s_piv_pin_verified = true;
                 rsp[0] = 0x90; rsp[1] = 0x00;
                 return 2;
@@ -364,11 +379,15 @@ uint16_t piv_process_apdu(const uint8_t *apdu, uint16_t apdu_len, uint8_t *rsp, 
 
     /* 4. RESET RETRY COUNTER (0x2C) */
     if (ins == 0x2C && p2 == 0x80) {
-        if (lc >= 16) {
+        if (lc >= 16 && data != NULL) {
             /* PUK (8) + New PIN (8) */
-            if (memcmp(data, s_piv_puk, 8) == 0) {
+            uint8_t padded_puk[8];
+            memset(padded_puk, 0xFF, sizeof(padded_puk));
+            memcpy(padded_puk, data, 8);
+            if (crypto_consttime_eq(padded_puk, s_piv_puk, 8)) {
                 memcpy(s_piv_pin, data + 8, 8);
                 s_piv_pin_tries = 3;
+                storage_set_pin_retries(PIN_TYPE_PIV_PIN, 3);
                 s_piv_puk_tries = 3;
                 s_piv_pin_verified = true;
                 rsp[0] = 0x90; rsp[1] = 0x00;
@@ -489,11 +508,18 @@ uint16_t piv_process_apdu(const uint8_t *apdu, uint16_t apdu_len, uint8_t *rsp, 
             uint16_t t7c_len = data[1];
             const uint8_t *t7c_data = data + 2;
             if (t7c_len == 0x82) {
+                if (lc < 4) { rsp[0] = 0x67; rsp[1] = 0x00; return 2; }
                 t7c_len = ((uint16_t)data[2] << 8) | data[3];
                 t7c_data = data + 4;
             } else if (t7c_len == 0x81) {
+                if (lc < 3) { rsp[0] = 0x67; rsp[1] = 0x00; return 2; }
                 t7c_len = data[2];
                 t7c_data = data + 3;
+            }
+
+            if ((uint16_t)((t7c_data - data) + t7c_len) > lc) {
+                rsp[0] = 0x67; rsp[1] = 0x00;
+                return 2;
             }
 
             /* Find Tag 0x81 (Challenge to sign) or Tag 0x85 (ECDH peer point) */
@@ -507,11 +533,15 @@ uint16_t piv_process_apdu(const uint8_t *apdu, uint16_t apdu_len, uint8_t *rsp, 
                 uint8_t tag = t7c_data[offset++];
                 uint16_t len = t7c_data[offset++];
                 if (len == 0x82) {
+                    if (offset + 2 > t7c_len) break;
                     len = ((uint16_t)t7c_data[offset] << 8) | t7c_data[offset + 1];
                     offset += 2;
                 } else if (len == 0x81) {
+                    if (offset >= t7c_len) break;
                     len = t7c_data[offset++];
                 }
+                if ((uint16_t)(offset + len) > t7c_len) break;
+
                 if (tag == 0x81) {
                     challenge = t7c_data + offset;
                     chal_len = len;

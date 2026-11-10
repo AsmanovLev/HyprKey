@@ -11,18 +11,6 @@ static oath_cred_t s_creds[OATH_MAX_CREDENTIALS];
 
 void oath_init(void) {
     memset(s_creds, 0, sizeof(s_creds));
-
-    /* Pre-populate demo credential: "Google:alice@hyprkey.local" */
-    /* Secret: 20 bytes "12345678901234567890" */
-    const char *demo_name = "Google:alice@hyprkey.local";
-    size_t name_len = strlen(demo_name);
-    memcpy(s_creds[0].name, demo_name, name_len);
-    s_creds[0].name_len = (uint8_t)name_len;
-    s_creds[0].type_alg = OATH_TYPE_TOTP | OATH_ALG_SHA1; /* 0x21 */
-    s_creds[0].digits = 6;
-    memcpy(s_creds[0].secret, "12345678901234567890", 20);
-    s_creds[0].secret_len = 20;
-    s_creds[0].valid = true;
 }
 
 static oath_cred_t *find_cred(const char *name, uint8_t name_len) {
@@ -171,6 +159,10 @@ uint16_t oath_process_apdu(const uint8_t *apdu, uint16_t apdu_len,
     if (ins == 0x02) {
         if (lc >= 2 && data[0] == 0x71) {
             uint8_t name_len = data[1];
+            if ((uint16_t)(2 + name_len) > lc) {
+                rsp[0] = 0x67; rsp[1] = 0x00; /* Wrong length */
+                return 2;
+            }
             const char *name = (const char *)&data[2];
             oath_cred_t *c = find_cred(name, name_len);
             if (c) {
