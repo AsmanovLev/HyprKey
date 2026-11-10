@@ -50,11 +50,12 @@ if %ERRORLEVEL% NEQ 0 (
     exit /b %ERRORLEVEL%
 )
 
-echo [HyprKey Build] Generating 4 standalone theme executables...
+echo [HyprKey Build] Generating 5 theme editions...
+copy /Y "bin\hyprkey.exe" "bin\hyprkey_nothing.exe" >nul
+copy /Y "bin\hyprkey.exe" "bin\hyprkey_circuit.exe" >nul
 copy /Y "bin\hyprkey.exe" "bin\hyprkey_linear.exe" >nul
 copy /Y "bin\hyprkey.exe" "bin\hyprkey_catppuccin.exe" >nul
-copy /Y "bin\hyprkey.exe" "bin\hyprkey_nordic.exe" >nul
 copy /Y "bin\hyprkey.exe" "bin\hyprkey_industrial.exe" >nul
 
-echo [HyprKey Build] SUCCESS: All 4 theme executables created in bin\
+echo [HyprKey Build] SUCCESS: All 5 editions created in bin\
 dir /b bin\*.exe

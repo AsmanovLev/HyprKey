@@ -40,18 +40,21 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
     GetModuleFileNameW(NULL, exePath, MAX_PATH);
     _wcslwr_s(exePath);
 
-    AppTheme initTheme = THEME_LINEAR;
-    const wchar_t* titleName = L"HyprKey Manager [Linear Stealth]";
+    AppTheme initTheme = THEME_NOTHING;
+    const wchar_t* titleName = L"HyprKey [Nothing OS Glyph Edition]";
 
-    if (wcsstr(exePath, L"catppuccin")) {
+    if (wcsstr(exePath, L"circuit")) {
+        initTheme = THEME_CIRCUIT;
+        titleName = L"HyprKey [Cyber Circuit PCB Edition]";
+    } else if (wcsstr(exePath, L"linear")) {
+        initTheme = THEME_LINEAR;
+        titleName = L"HyprKey [Linear Stealth Edition]";
+    } else if (wcsstr(exePath, L"catppuccin")) {
         initTheme = THEME_CATPPUCCIN;
-        titleName = L"HyprKey Manager [Catppuccin Mocha]";
-    } else if (wcsstr(exePath, L"nordic")) {
-        initTheme = THEME_NORDIC;
-        titleName = L"HyprKey Manager [Nordic Waybar]";
+        titleName = L"HyprKey [Catppuccin Mocha Edition]";
     } else if (wcsstr(exePath, L"industrial")) {
         initTheme = THEME_INDUSTRIAL;
-        titleName = L"HyprKey Manager [Industrial Amber]";
+        titleName = L"HyprKey [Industrial Amber Edition]";
     }
 
     // Create application window
@@ -67,8 +70,8 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
     };
     ::RegisterClassExW(&wc);
 
-    int window_width = 1100;
-    int window_height = 720;
+    int window_width = 1120;
+    int window_height = 730;
 
     // Center window on primary monitor
     int screen_w = GetSystemMetrics(SM_CXSCREEN);
@@ -96,7 +99,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
         return 1;
     }
 
-    // Show the window
+    // Show window
     ::ShowWindow(hwnd, SW_SHOWDEFAULT);
     ::UpdateWindow(hwnd);
 
@@ -118,11 +121,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
         0,
     };
 
-    if (initTheme == THEME_NORDIC) {
-        g_FontUI = io.Fonts->AddFontFromFileTTF("C:\\Windows\\Fonts\\CascadiaCode.ttf", 17.0f, &font_cfg, glyph_ranges);
-    } else {
-        g_FontUI = io.Fonts->AddFontFromFileTTF("C:\\Windows\\Fonts\\segoeui.ttf", 18.0f, &font_cfg, glyph_ranges);
-    }
+    g_FontUI = io.Fonts->AddFontFromFileTTF("C:\\Windows\\Fonts\\segoeui.ttf", 18.0f, &font_cfg, glyph_ranges);
 
     g_FontMono = io.Fonts->AddFontFromFileTTF("C:\\Windows\\Fonts\\CascadiaCode.ttf", 17.0f, &font_cfg, glyph_ranges);
     if (!g_FontMono) {
@@ -162,7 +161,6 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
         if (done)
             break;
 
-        // Handle window being minimized or screen occluded
         if (g_SwapChainOccluded && g_pSwapChain->Present(0, DXGI_PRESENT_TEST) == DXGI_STATUS_OCCLUDED)
         {
             ::Sleep(10);
@@ -170,7 +168,6 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
         }
         g_SwapChainOccluded = false;
 
-        // Handle window resize
         if (g_ResizeWidth != 0 && g_ResizeHeight != 0)
         {
             CleanupRenderTarget();
@@ -179,14 +176,12 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
             CreateRenderTarget();
         }
 
-        // Start Dear ImGui frame
         ImGui_ImplDX11_NewFrame();
         ImGui_ImplWin32_NewFrame();
         ImGui::NewFrame();
 
         if (g_FontUI) ImGui::PushFont(g_FontUI);
 
-        // Fullscreen dock/window canvas covering entire client rect
         ImGui::SetNextWindowPos(ImVec2(0, 0));
         ImGui::SetNextWindowSize(io.DisplaySize);
         ImGuiWindowFlags main_win_flags = ImGuiWindowFlags_NoTitleBar
@@ -206,7 +201,6 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 
         if (g_FontUI) ImGui::PopFont();
 
-        // Rendering
         ImGui::Render();
         ImVec4 cc = GetThemeClearColor(g_CurrentTheme);
         const float clear_color[4] = { cc.x, cc.y, cc.z, cc.w };
@@ -214,12 +208,10 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
         g_pd3dDeviceContext->ClearRenderTargetView(g_mainRenderTargetView, clear_color);
         ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
 
-        // Present with vsync
         HRESULT hr = g_pSwapChain->Present(1, 0);
         g_SwapChainOccluded = (hr == DXGI_STATUS_OCCLUDED);
     }
 
-    // Cleanup
     scard_client.disconnect();
     ImGui_ImplDX11_Shutdown();
     ImGui_ImplWin32_Shutdown();
