@@ -1,6 +1,7 @@
 #include "oath.h"
 #include "sha1/sha1.h"
 #include "sha256/sha256.h"
+#include "crypto_consttime.h"
 #include <string.h>
 
 static const uint8_t s_oath_aid[7] = {
@@ -88,11 +89,12 @@ uint16_t oath_process_apdu(const uint8_t *apdu, uint16_t apdu_len,
         return 2;
     }
 
-    uint16_t lc = 0;
+    /* Parse Lc and Data pointer using strict ISO/IEC 7816-4 parser */
+    uint16_t lc = 0U;
     const uint8_t *data = NULL;
-    if (apdu_len >= 5) {
-        lc = apdu[4];
-        data = apdu + 5;
+    if (!iso7816_parse_apdu(apdu, apdu_len, &data, &lc)) {
+        rsp[0] = 0x67; rsp[1] = 0x00; /* SW_WRONG_LENGTH */
+        return 2;
     }
 
     /* 2. PUT (0x01): Store credential */

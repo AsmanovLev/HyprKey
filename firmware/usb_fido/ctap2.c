@@ -390,18 +390,16 @@ static uint16_t handle_make_credential(const uint8_t *payload, uint16_t len, uin
             /* 4: pubKeyCredParams (array of {"type": "public-key", "alg": int}) */
             uint8_t v_major;
             uint64_t param_count;
-            if (cbor_r_get_header(&r, &v_major, &param_count) && v_major == 4) {
+            if (cbor_r_get_header(&r, &v_major, &param_count) && v_major == 4 && param_count <= 16) {
                 for (uint64_t i = 0; i < param_count; i++) {
                     uint8_t item_major;
                     uint64_t item_entries;
-                    if (cbor_r_get_header(&r, &item_major, &item_entries) && item_major == 5) {
+                    if (cbor_r_get_header(&r, &item_major, &item_entries) && item_major == 5 && item_entries <= 8) {
                         int32_t entry_alg = 0;
                         for (uint64_t p = 0; p < item_entries; p++) {
-                            uint8_t pk_major;
-                            uint64_t pk_len;
-                            if (cbor_r_get_header(&r, &pk_major, &pk_len) && pk_major == 3) {
-                                const uint8_t *k_str = r.data + r.pos;
-                                r.pos += (size_t)pk_len;
+                            const uint8_t *k_str;
+                            size_t pk_len;
+                            if (cbor_r_get_bytes(&r, 3, &k_str, &pk_len)) {
                                 if (pk_len == 3 && memcmp(k_str, "alg", 3) == 0) {
                                     uint8_t a_major;
                                     uint64_t a_val;
@@ -410,10 +408,10 @@ static uint16_t handle_make_credential(const uint8_t *payload, uint16_t len, uin
                                         else if (a_major == 1) entry_alg = (int32_t)(-1 - a_val);
                                     }
                                 } else {
-                                    cbor_r_skip(&r);
+                                    if (!cbor_r_skip(&r)) break;
                                 }
                             } else {
-                                cbor_r_skip(&r);
+                                if (!cbor_r_skip(&r)) break;
                             }
                         }
                         /* Preference: ML-DSA-44 (-48), ML-DSA-65 (-49), ML-DSA-87 (-50), Ed25519 (-8), ES256 (-7) */
@@ -424,7 +422,7 @@ static uint16_t handle_make_credential(const uint8_t *payload, uint16_t len, uin
                             }
                         }
                     } else {
-                        cbor_r_skip(&r);
+                        if (!cbor_r_skip(&r)) break;
                     }
                 }
             } else {
@@ -535,6 +533,7 @@ static uint16_t handle_make_credential(const uint8_t *payload, uint16_t len, uin
     cbor_w_int(&rw, 3); cbor_w_map(&rw, 0);
 
     rsp[0] = CTAP1_ERR_SUCCESS;
+    crypto_zero(cred_seed, sizeof(cred_seed));
     return (uint16_t)(rw.pos + 1);
 }
 
@@ -589,11 +588,11 @@ static uint16_t handle_get_assertion(const uint8_t *payload, uint16_t len, uint8
             /* 3: allowList (array of {"id": bstr, "type": "public-key"}) */
             uint8_t v_major;
             uint64_t list_count;
-            if (cbor_r_get_header(&r, &v_major, &list_count) && v_major == 4) {
+            if (cbor_r_get_header(&r, &v_major, &list_count) && v_major == 4 && list_count <= 16) {
                 for (uint64_t i = 0; i < list_count; i++) {
                     uint8_t d_major;
                     uint64_t d_entries;
-                    if (cbor_r_get_header(&r, &d_major, &d_entries) && d_major == 5) {
+                    if (cbor_r_get_header(&r, &d_major, &d_entries) && d_major == 5 && d_entries <= 8) {
                         for (uint64_t d = 0; d < d_entries; d++) {
                             const uint8_t *k_str;
                             size_t dk_len;
@@ -714,6 +713,7 @@ static uint16_t handle_get_assertion(const uint8_t *payload, uint16_t len, uint8
     cbor_w_bstr(&rw, sig_buf, sig_len);
 
     rsp[0] = CTAP1_ERR_SUCCESS;
+    crypto_zero(cred_seed, sizeof(cred_seed));
     return (uint16_t)(rw.pos + 1);
 }
 

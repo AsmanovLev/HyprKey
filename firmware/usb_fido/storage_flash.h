@@ -51,9 +51,31 @@ uint32_t storage_increment_sign_counter(void);
 #define PIN_TYPE_PGP_PW1    0
 #define PIN_TYPE_PGP_PW3    1
 #define PIN_TYPE_PIV_PIN    2
+#define PIN_TYPE_PIV_PUK    3
 
 uint8_t storage_get_pin_retries(uint8_t pin_type);
 void storage_set_pin_retries(uint8_t pin_type, uint8_t retries);
+
+/* ==================== NFC Physical Presence Lock Configuration ==================== */
+#define FLASH_NFC_LOCK_PAGE_ADDR (FLASH_USERDATA_BASE + 0x2000UL) /* 0x0005B000 (Page 2) */
+#define NFC_LOCK_MAGIC           0x4E4C4B31UL /* 'NLK1' */
+
+#define NFC_LOCK_MODE_DISABLED   0
+#define NFC_LOCK_MODE_STATIC_UID 1
+#define NFC_LOCK_MODE_EMV_CRYPTO 2
+
+typedef struct {
+    uint32_t magic;
+    uint8_t  lock_mode;
+    uint8_t  enrolled_uid_len;
+    uint8_t  enrolled_uid[10];
+    uint8_t  enrolled_card_hash[32];
+    uint8_t  reserved[16];
+} nfc_lock_config_t;
+
+bool storage_get_nfc_lock_config(nfc_lock_config_t *cfg);
+bool storage_set_nfc_lock_config(const nfc_lock_config_t *cfg);
+void storage_disable_nfc_lock(void);
 
 /* ==================== High-level Autonomous OTA API ==================== */
 uint8_t ota_get_current_slot(void);

@@ -4,6 +4,7 @@
 #include "oath/oath.h"
 #include "device_log.h"
 #include "storage_flash.h"
+#include "../pn532_nfc.h"
 #include <string.h>
 
 typedef enum {
@@ -178,6 +179,124 @@ uint16_t ccid_process_message(const uint8_t *req, uint16_t req_len, uint8_t *rsp
                 return 10 + apdu_rsp_len;
             }
 
+            /* Intercept Vendor APDU for NFC Tag Scan / Inspection (INS=0xEA) */
+            if (apdu_len >= 4 && apdu[1] == 0xEA) {
+                uint16_t apdu_rsp_len = pn532_scan_tag(rsp + 10, max_rsp_len - 10);
+                rsp[0] = CCID_RDR_TO_PC_DATA_BLOCK;
+                rsp[1] = (uint8_t)(apdu_rsp_len & 0xFF);
+                rsp[2] = (uint8_t)((apdu_rsp_len >> 8) & 0xFF);
+                rsp[3] = 0;
+                rsp[4] = 0;
+                rsp[5] = slot;
+                rsp[6] = seq;
+                rsp[7] = 0x00; /* Success, card active */
+                rsp[8] = 0x00;
+                rsp[9] = 0x00;
+                return 10 + apdu_rsp_len;
+            }
+
+            /* Intercept Vendor APDU for NFC Physical Presence Lock Management (INS=0xEB) */
+            if (apdu_len >= 4 && apdu[1] == 0xEB) {
+                uint8_t sub_cmd = apdu[2];
+                uint8_t mode = apdu[3];
+
+                if (sub_cmd == 0x00) {
+                    /* Query Lock Status: FF EB 00 00 */
+                    uint8_t lmode;
+                    bool locked;
+                    uint8_t ulen;
+                    uint8_t e_uid[10];
+                    uint8_t e_hash[32];
+                    pn532_get_lock_status(&lmode, &locked, &ulen, e_uid, e_hash);
+
+                    uint16_t apdu_rsp_len = 0;
+                    rsp[10 + apdu_rsp_len++] = lmode;
+                    rsp[10 + apdu_rsp_len++] = locked ? 0x01 : 0x00;
+                    rsp[10 + apdu_rsp_len++] = ulen;
+                    memcpy(rsp + 10 + apdu_rsp_len, e_uid, ulen);
+                    apdu_rsp_len += ulen;
+                    memcpy(rsp + 10 + apdu_rsp_len, e_hash, 32);
+                    apdu_rsp_len += 32;
+
+                    rsp[10 + apdu_rsp_len++] = 0x90;
+                    rsp[10 + apdu_rsp_len++] = 0x00;
+
+                    rsp[0] = CCID_RDR_TO_PC_DATA_BLOCK;
+                    rsp[1] = (uint8_t)(apdu_rsp_len & 0xFF);
+                    rsp[2] = (uint8_t)((apdu_rsp_len >> 8) & 0xFF);
+                    rsp[3] = 0; rsp[4] = 0; rsp[5] = slot; rsp[6] = seq;
+                    rsp[7] = 0x00; rsp[8] = 0x00; rsp[9] = 0x00;
+                    return 10 + apdu_rsp_len;
+                }
+
+                /* Mutating commands (Enroll 0x01, Disable 0x02) require verified Admin PIN (PW3) */
+                if (!openpgp_is_pw3_verified()) {
+                    rsp[0] = CCID_RDR_TO_PC_DATA_BLOCK;
+                    rsp[1] = 2; rsp[2] = 0; rsp[3] = 0; rsp[4] = 0;
+                    rsp[5] = slot; rsp[6] = seq; rsp[7] = 0x00; rsp[8] = 0x00; rsp[9] = 0x00;
+                    rsp[10] = 0x69; rsp[11] = 0x82; /* Security status not satisfied */
+                    return 12;
+                }
+
+                if (sub_cmd == 0x01) {
+                    /* Enroll: mode 1 = Static UID, mode 2 = EMV Crypto */
+                    uint16_t apdu_rsp_len = 0;
+                    if (mode == 0x01) {
+                        uint8_t enrolled_uid[10];
+                        uint8_t ulen = 0;
+                        if (pn532_enroll_tag_uid(enrolled_uid, &ulen)) {
+                            rsp[10 + apdu_rsp_len++] = 0x01; /* Warning: Insecure Static UID */
+                            rsp[10 + apdu_rsp_len++] = ulen;
+                            memcpy(rsp + 10 + apdu_rsp_len, enrolled_uid, ulen);
+                            apdu_rsp_len += ulen;
+                            rsp[10 + apdu_rsp_len++] = 0x90;
+                            rsp[10 + apdu_rsp_len++] = 0x00;
+                        } else {
+                            rsp[10 + apdu_rsp_len++] = 0x6A;
+                            rsp[10 + apdu_rsp_len++] = 0x80; /* Incorrect parameters / no card */
+                        }
+                    } else if (mode == 0x02) {
+                        uint8_t hash[32];
+                        if (pn532_enroll_emv_crypto(hash)) {
+                            rsp[10 + apdu_rsp_len++] = 0x00; /* Secure: Zero-clone EMV */
+                            memcpy(rsp + 10 + apdu_rsp_len, hash, 32);
+                            apdu_rsp_len += 32;
+                            rsp[10 + apdu_rsp_len++] = 0x90;
+                            rsp[10 + apdu_rsp_len++] = 0x00;
+                        } else {
+                            rsp[10 + apdu_rsp_len++] = 0x6A;
+                            rsp[10 + apdu_rsp_len++] = 0x80;
+                        }
+                    }
+                    rsp[0] = CCID_RDR_TO_PC_DATA_BLOCK;
+                    rsp[1] = (uint8_t)(apdu_rsp_len & 0xFF);
+                    rsp[2] = (uint8_t)((apdu_rsp_len >> 8) & 0xFF);
+                    rsp[3] = 0; rsp[4] = 0; rsp[5] = slot; rsp[6] = seq;
+                    rsp[7] = 0x00; rsp[8] = 0x00; rsp[9] = 0x00;
+                    return 10 + apdu_rsp_len;
+                }
+
+                if (sub_cmd == 0x02) {
+                    /* Disable Lock */
+                    pn532_disable_lock();
+                    rsp[0] = CCID_RDR_TO_PC_DATA_BLOCK;
+                    rsp[1] = 2; rsp[2] = 0; rsp[3] = 0; rsp[4] = 0;
+                    rsp[5] = slot; rsp[6] = seq; rsp[7] = 0x00; rsp[8] = 0x00; rsp[9] = 0x00;
+                    rsp[10] = 0x90; rsp[11] = 0x00;
+                    return 12;
+                }
+
+                if (sub_cmd == 0x03) {
+                    /* Lock now (re-arm lock immediately) */
+                    pn532_lock_force();
+                    rsp[0] = CCID_RDR_TO_PC_DATA_BLOCK;
+                    rsp[1] = 2; rsp[2] = 0; rsp[3] = 0; rsp[4] = 0;
+                    rsp[5] = slot; rsp[6] = seq; rsp[7] = 0x00; rsp[8] = 0x00; rsp[9] = 0x00;
+                    rsp[10] = 0x90; rsp[11] = 0x00;
+                    return 12;
+                }
+            }
+
             /* Explicit Applet Switching on SELECT AID (00 A4 04 ...) */
             if (apdu_len >= 5 && apdu[1] == 0xA4 && apdu[2] == 0x04) {
                 uint8_t aid_len = apdu[4];
@@ -191,6 +310,20 @@ uint16_t ccid_process_message(const uint8_t *req, uint16_t req_len, uint8_t *rsp
                 } else if (aid_len >= 6 && memcmp(aid, "\xD2\x76\x00\x01\x24\x01", 6) == 0) {
                     s_active_applet = CCID_APPLET_OPENPGP;
                     dev_log(DEV_LOG_MOD_OPENPGP, DEV_LOG_SEV_INFO, DEV_LOG_EVT_PGP_SELECT, 0, 0);
+                }
+            }
+
+            /* Check Physical Presence Lock: block cryptographic & secret operations if locked */
+            if (pn532_is_locked()) {
+                uint8_t ins = (apdu_len >= 2) ? apdu[1] : 0;
+                /* If INS is PSO (0x2A), GENERATE KEY (0x47), GENERAL AUTHENTICATE (0x87),
+                 * VERIFY (0x20), or CHANGE PIN (0x24), reject with 0x6982 */
+                if (ins == 0x2A || ins == 0x47 || ins == 0x87 || ins == 0x20 || ins == 0x24) {
+                    rsp[0] = CCID_RDR_TO_PC_DATA_BLOCK;
+                    rsp[1] = 2; rsp[2] = 0; rsp[3] = 0; rsp[4] = 0;
+                    rsp[5] = slot; rsp[6] = seq; rsp[7] = 0x00; rsp[8] = 0x00; rsp[9] = 0x00;
+                    rsp[10] = 0x69; rsp[11] = 0x82; /* Security status not satisfied: device locked */
+                    return 12;
                 }
             }
 

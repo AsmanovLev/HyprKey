@@ -405,27 +405,12 @@ uint16_t openpgp_process_apdu(const uint8_t *apdu, uint16_t apdu_len, uint8_t *r
 
     (void)cla;
 
-    /* Parse Lc and Data pointer (Short and Extended APDUs) with strict length validation */
-    uint16_t lc = 0;
+    /* Parse Lc and Data pointer using strict ISO/IEC 7816-4 parser (Short and Extended APDUs) */
+    uint16_t lc = 0U;
     const uint8_t *data = NULL;
-    if (apdu_len > 4) {
-        if (apdu[4] == 0x00 && apdu_len >= 7) {
-            /* Extended APDU: [CLA INS P1 P2 00 B1 B2 ...DATA...] */
-            lc = ((uint16_t)apdu[5] << 8) | apdu[6];
-            if (apdu_len < (uint16_t)(7 + lc)) {
-                rsp[0] = 0x67; rsp[1] = 0x00; /* SW_WRONG_LENGTH */
-                return 2;
-            }
-            data = (lc > 0) ? &apdu[7] : NULL;
-        } else {
-            /* Short APDU: [CLA INS P1 P2 Lc ...DATA...] */
-            lc = apdu[4];
-            if (apdu_len < (uint16_t)(5 + lc)) {
-                rsp[0] = 0x67; rsp[1] = 0x00; /* SW_WRONG_LENGTH */
-                return 2;
-            }
-            data = (lc > 0) ? &apdu[5] : NULL;
-        }
+    if (!iso7816_parse_apdu(apdu, apdu_len, &data, &lc)) {
+        rsp[0] = 0x67; rsp[1] = 0x00; /* SW_WRONG_LENGTH */
+        return 2;
     }
 
     /* 1. SELECT (0xA4) */
@@ -600,6 +585,56 @@ uint16_t openpgp_process_apdu(const uint8_t *apdu, uint16_t apdu_len, uint8_t *r
 
         rsp[0] = 0x6A; rsp[1] = 0x88;
         return 2;
+    }
+
+    /* 3b. CHANGE REFERENCE DATA (0x24) - Supports PW1 and PW3 (Admin PIN) modification */
+    if (ins == 0x24 && p1 == 0x00 && (p2 == 0x81 || p2 == 0x83)) {
+        if (data == NULL) {
+            rsp[0] = 0x67; rsp[1] = 0x00;
+            return 2;
+        }
+        if (p2 == 0x81) {
+            /* Change PW1: data = [Old PW1 (s_pw1_len)] || [New PW1 (min 6 bytes)] */
+            if (s_pw1_tries == 0) { rsp[0] = 0x69; rsp[1] = 0x83; return 2; }
+            if (lc < (uint16_t)(s_pw1_len + 6U) || lc > (uint16_t)(s_pw1_len + sizeof(s_pw1) - 1)) {
+                rsp[0] = 0x67; rsp[1] = 0x00;
+                return 2;
+            }
+            if (!crypto_consttime_eq(data, s_pw1, s_pw1_len)) {
+                if (s_pw1_tries > 0) s_pw1_tries--;
+                storage_set_pin_retries(PIN_TYPE_PGP_PW1, s_pw1_tries);
+                rsp[0] = 0x63; rsp[1] = (uint8_t)(0xC0 | s_pw1_tries);
+                return 2;
+            }
+            uint8_t new_len = (uint8_t)(lc - s_pw1_len);
+            memcpy(s_pw1, data + s_pw1_len, new_len);
+            s_pw1_len = new_len;
+            s_pw1_tries = 3;
+            storage_set_pin_retries(PIN_TYPE_PGP_PW1, 3);
+            rsp[0] = 0x90; rsp[1] = 0x00;
+            return 2;
+        } else {
+            /* Change PW3 (Admin PIN): data = [Old PW3 (s_pw3_len)] || [New PW3 (min 8 bytes)] */
+            if (s_pw3_tries == 0) { rsp[0] = 0x69; rsp[1] = 0x83; return 2; }
+            if (lc < (uint16_t)(s_pw3_len + 8U) || lc > (uint16_t)(s_pw3_len + sizeof(s_pw3) - 1)) {
+                rsp[0] = 0x67; rsp[1] = 0x00;
+                return 2;
+            }
+            if (!crypto_consttime_eq(data, s_pw3, s_pw3_len)) {
+                if (s_pw3_tries > 0) s_pw3_tries--;
+                storage_set_pin_retries(PIN_TYPE_PGP_PW3, s_pw3_tries);
+                rsp[0] = 0x63; rsp[1] = (uint8_t)(0xC0 | s_pw3_tries);
+                return 2;
+            }
+            uint8_t new_len = (uint8_t)(lc - s_pw3_len);
+            memcpy(s_pw3, data + s_pw3_len, new_len);
+            s_pw3_len = new_len;
+            s_pw3_tries = 3;
+            s_pw3_verified = true;
+            storage_set_pin_retries(PIN_TYPE_PGP_PW3, 3);
+            rsp[0] = 0x90; rsp[1] = 0x00;
+            return 2;
+        }
     }
 
     /* 4. PUT DATA (0xDA) */

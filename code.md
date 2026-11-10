@@ -123,7 +123,7 @@ SECTIONS
 
 > **Description:** Stage-2 Bootloader Switcher (Fast A/B Dispatcher)  
 > **Path:** `firmware/stage2_bootloader/stage2_main.c`  
-> **Lines:** 167  
+> **Lines:** 172  
 
 ```c
 #include <stdint.h>
@@ -189,10 +189,15 @@ static bool is_valid_image(uint32_t base) {
         return false;
     }
 
-    /* Verify payload SHA-256 integrity against stamped header */
+    /* Verify compound SHA-256 integrity (vectors 0x00..0x4F + payload 0x80..EOF) against stamped header */
     if (hdr->image_size > 0x80 && hdr->image_size <= SLOT_SIZE) {
+        sha256_ctx_t ctx;
         uint8_t actual_hash[32];
-        sha256_hash((const uint8_t *)(base + 0x80), hdr->image_size - 0x80, actual_hash);
+        sha256_init(&ctx);
+        sha256_update(&ctx, (const uint8_t *)base, 0x50U);
+        sha256_update(&ctx, (const uint8_t *)(base + 0x80UL), hdr->image_size - 0x80UL);
+        sha256_final(&ctx, actual_hash);
+
         for (int i = 0; i < 32; i++) {
             if (actual_hash[i] != hdr->sha256[i]) {
                 return false; /* Payload hash mismatch! */
@@ -334,7 +339,7 @@ _Static_assert(sizeof(app_header_t) == 64, "app_header_t must be exactly 64 byte
 
 > **Description:** Constant-Time Memory & Secret Comparison Primitives  
 > **Path:** `firmware/usb_fido/crypto_consttime.h`  
-> **Lines:** 22  
+> **Lines:** 80  
 
 ```c
 #ifndef CRYPTO_CONSTTIME_H
@@ -358,6 +363,64 @@ static inline bool crypto_consttime_eq(const void *a, const void *b, size_t len)
     return (diff == 0U);
 }
 
+/**
+ * Secure memory zeroization to wipe sensitive keys from SRAM/stack.
+ */
+static inline void crypto_zero(void *ptr, size_t len) {
+    volatile uint8_t *p = (volatile uint8_t *)ptr;
+    while (len--) {
+        *p++ = 0U;
+    }
+}
+
+/**
+ * Strict ISO/IEC 7816-4 APDU parser.
+ * Accurately parses Cases 1, 2S, 2E, 3S, 3E, 4S, 4E, correctly separating Lc data from Le.
+ */
+static inline bool iso7816_parse_apdu(const uint8_t *apdu, uint16_t apdu_len,
+                                      const uint8_t **data_out, uint16_t *lc_out) {
+    *data_out = NULL;
+    *lc_out   = 0U;
+
+    if (apdu_len < 4U) {
+        return false;
+    }
+    if (apdu_len == 4U) {
+        return true; /* Case 1: [CLA INS P1 P2] */
+    }
+    if (apdu_len == 5U) {
+        return true; /* Case 2S: [CLA INS P1 P2 Le] — No body (Lc = 0) */
+    }
+
+    if (apdu[4] == 0x00U) {
+        /* Extended APDU */
+        if (apdu_len == 7U) {
+            return true; /* Case 2E: [CLA INS P1 P2 00 Le1 Le2] — No body (Lc = 0) */
+        }
+        uint16_t lc = (uint16_t)(((uint16_t)apdu[5] << 8U) | apdu[6]);
+        if (lc == 0U) {
+            return false;
+        }
+        /* Case 3E: (7 + lc) or Case 4E: (7 + lc + 2 bytes Le) */
+        if (apdu_len != (uint16_t)(7U + lc) && apdu_len != (uint16_t)(7U + lc + 2U)) {
+            return false;
+        }
+        *data_out = &apdu[7];
+        *lc_out   = lc;
+        return true;
+    } else {
+        /* Short APDU */
+        uint16_t lc = apdu[4];
+        /* Case 3S: (5 + lc) or Case 4S: (5 + lc + 1 byte Le) */
+        if (apdu_len != (uint16_t)(5U + lc) && apdu_len != (uint16_t)(5U + lc + 1U)) {
+            return false;
+        }
+        *data_out = &apdu[5];
+        *lc_out   = lc;
+        return true;
+    }
+}
+
 #endif /* CRYPTO_CONSTTIME_H */
 ```
 
@@ -368,7 +431,7 @@ static inline bool crypto_consttime_eq(const void *a, const void *b, size_t len)
 
 > **Description:** Flash Layout & Dual-Slot Storage Header  
 > **Path:** `firmware/usb_fido/storage_flash.h`  
-> **Lines:** 66  
+> **Lines:** 88  
 
 ```c
 #ifndef STORAGE_FLASH_H
@@ -424,9 +487,31 @@ uint32_t storage_increment_sign_counter(void);
 #define PIN_TYPE_PGP_PW1    0
 #define PIN_TYPE_PGP_PW3    1
 #define PIN_TYPE_PIV_PIN    2
+#define PIN_TYPE_PIV_PUK    3
 
 uint8_t storage_get_pin_retries(uint8_t pin_type);
 void storage_set_pin_retries(uint8_t pin_type, uint8_t retries);
+
+/* ==================== NFC Physical Presence Lock Configuration ==================== */
+#define FLASH_NFC_LOCK_PAGE_ADDR (FLASH_USERDATA_BASE + 0x2000UL) /* 0x0005B000 (Page 2) */
+#define NFC_LOCK_MAGIC           0x4E4C4B31UL /* 'NLK1' */
+
+#define NFC_LOCK_MODE_DISABLED   0
+#define NFC_LOCK_MODE_STATIC_UID 1
+#define NFC_LOCK_MODE_EMV_CRYPTO 2
+
+typedef struct {
+    uint32_t magic;
+    uint8_t  lock_mode;
+    uint8_t  enrolled_uid_len;
+    uint8_t  enrolled_uid[10];
+    uint8_t  enrolled_card_hash[32];
+    uint8_t  reserved[16];
+} nfc_lock_config_t;
+
+bool storage_get_nfc_lock_config(nfc_lock_config_t *cfg);
+bool storage_set_nfc_lock_config(const nfc_lock_config_t *cfg);
+void storage_disable_nfc_lock(void);
 
 /* ==================== High-level Autonomous OTA API ==================== */
 uint8_t ota_get_current_slot(void);
@@ -446,7 +531,7 @@ uint16_t ota_process_apdu(const uint8_t *apdu, uint16_t apdu_len, uint8_t *rsp, 
 
 > **Description:** Dual-Slot Flash Manager, 4-Byte Journal & Live OTA APDU  
 > **Path:** `firmware/usb_fido/storage_flash.c`  
-> **Lines:** 529  
+> **Lines:** 577  
 
 ```c
 #include "storage_flash.h"
@@ -596,6 +681,9 @@ bool storage_flash_write(uint32_t byte_offset, const void *src, size_t len) {
 
 /* ==================== Persistent Monotonic Counter & PIN Tries ==================== */
 
+#define FLASH_SIGN_CNT_PAGE_ADDR  (FLASH_USERDATA_BASE)
+#define FLASH_PIN_STATE_PAGE_ADDR (FLASH_USERDATA_BASE + FLASH_PAGE_SIZE)
+
 static uint32_t s_cached_sign_counter = 0;
 static bool s_sign_counter_initialized = false;
 
@@ -603,9 +691,9 @@ uint32_t storage_get_sign_counter(void) {
     if (s_sign_counter_initialized) {
         return s_cached_sign_counter;
     }
-    const uint32_t *log = (const uint32_t *)FLASH_USERDATA_BASE;
+    const uint32_t *log = (const uint32_t *)FLASH_SIGN_CNT_PAGE_ADDR;
     uint32_t val = 0;
-    for (uint32_t i = 0; i < 512; i++) {
+    for (uint32_t i = 0; i < 1024; i++) {
         if (log[i] == 0xFFFFFFFFUL) {
             break;
         }
@@ -621,39 +709,32 @@ uint32_t storage_get_sign_counter(void) {
 
 uint32_t storage_increment_sign_counter(void) {
     uint32_t cur = storage_get_sign_counter();
-    uint32_t next = cur + 1;
+    uint32_t next = cur + 1U;
     s_cached_sign_counter = next;
 
-    const uint32_t *log = (const uint32_t *)FLASH_USERDATA_BASE;
-    uint32_t next_idx = 512;
-    for (uint32_t i = 0; i < 512; i++) {
+    const uint32_t *log = (const uint32_t *)FLASH_SIGN_CNT_PAGE_ADDR;
+    uint32_t next_idx = 1024U;
+    for (uint32_t i = 0U; i < 1024U; i++) {
         if (log[i] == 0xFFFFFFFFUL) {
             next_idx = i;
             break;
         }
     }
 
-    if (next_idx >= 512) {
-        /* Preserve PIN retry second half before page erase */
-        uint32_t pin_half[512];
-        memcpy(pin_half, (const void *)(FLASH_USERDATA_BASE + 2048), sizeof(pin_half));
-        nvmc_raw_erase_page(FLASH_USERDATA_BASE);
-        for (uint32_t i = 0; i < 512; i++) {
-            if (pin_half[i] != 0xFFFFFFFFUL) {
-                nvmc_raw_write_word(FLASH_USERDATA_BASE + 2048 + (i * 4), pin_half[i]);
-            }
-        }
-        next_idx = 0;
+    if (next_idx >= 1024U) {
+        /* Erase only the sign counter page. PIN state on neighboring page is completely safe. */
+        nvmc_raw_erase_page(FLASH_SIGN_CNT_PAGE_ADDR);
+        next_idx = 0U;
     }
 
-    nvmc_raw_write_word(FLASH_USERDATA_BASE + (next_idx * 4), next);
+    nvmc_raw_write_word(FLASH_SIGN_CNT_PAGE_ADDR + (next_idx * 4U), next);
     return next;
 }
 
 uint8_t storage_get_pin_retries(uint8_t pin_type) {
-    const uint32_t *log = (const uint32_t *)(FLASH_USERDATA_BASE + 2048);
+    const uint32_t *log = (const uint32_t *)FLASH_PIN_STATE_PAGE_ADDR;
     uint8_t tries = 3; /* default */
-    for (uint32_t i = 0; i < 512; i++) {
+    for (uint32_t i = 0; i < 1024; i++) {
         uint32_t entry = log[i];
         if (entry == 0xFFFFFFFFUL) {
             break;
@@ -666,30 +747,85 @@ uint8_t storage_get_pin_retries(uint8_t pin_type) {
 }
 
 void storage_set_pin_retries(uint8_t pin_type, uint8_t retries) {
-    const uint32_t *log = (const uint32_t *)(FLASH_USERDATA_BASE + 2048);
-    uint32_t next_idx = 512;
-    for (uint32_t i = 0; i < 512; i++) {
+    /* Guard: Avoid unnecessary Flash writes if current retry count matches */
+    if (storage_get_pin_retries(pin_type) == retries) {
+        return;
+    }
+
+    const uint32_t *log = (const uint32_t *)FLASH_PIN_STATE_PAGE_ADDR;
+    uint32_t next_idx = 1024U;
+    for (uint32_t i = 0U; i < 1024U; i++) {
         if (log[i] == 0xFFFFFFFFUL) {
             next_idx = i;
             break;
         }
     }
 
-    if (next_idx >= 512) {
-        /* Preserve sign counter first half before page erase */
-        uint32_t sign_half[512];
-        memcpy(sign_half, (const void *)FLASH_USERDATA_BASE, sizeof(sign_half));
-        nvmc_raw_erase_page(FLASH_USERDATA_BASE);
-        for (uint32_t i = 0; i < 512; i++) {
-            if (sign_half[i] != 0xFFFFFFFFUL) {
-                nvmc_raw_write_word(FLASH_USERDATA_BASE + (i * 4), sign_half[i]);
-            }
+    if (next_idx >= 1024U) {
+        /* Compact only the 4 active counters (PW1, PW3, PIV_PIN, PIV_PUK) instead of copying old history */
+        uint8_t cur_tries[4];
+        for (uint8_t t = 0U; t < 4U; t++) {
+            cur_tries[t] = (t == pin_type) ? retries : storage_get_pin_retries(t);
         }
-        next_idx = 0;
+        nvmc_raw_erase_page(FLASH_PIN_STATE_PAGE_ADDR);
+        for (uint8_t t = 0U; t < 4U; t++) {
+            uint32_t e = ((uint32_t)t) | ((uint32_t)cur_tries[t] << 8U) | 0xFFFF0000UL;
+            nvmc_raw_write_word(FLASH_PIN_STATE_PAGE_ADDR + (t * 4U), e);
+        }
+        return;
     }
 
-    uint32_t entry = ((uint32_t)pin_type) | ((uint32_t)retries << 8) | 0xFFFF0000UL;
-    nvmc_raw_write_word(FLASH_USERDATA_BASE + 2048 + (next_idx * 4), entry);
+    uint32_t entry = ((uint32_t)pin_type) | ((uint32_t)retries << 8U) | 0xFFFF0000UL;
+    nvmc_raw_write_word(FLASH_PIN_STATE_PAGE_ADDR + (next_idx * 4U), entry);
+}
+
+/* ==================== NFC Physical Presence Lock Configuration Storage ==================== */
+
+bool storage_get_nfc_lock_config(nfc_lock_config_t *cfg) {
+    if (!cfg) return false;
+    const nfc_lock_config_t *flash_cfg = (const nfc_lock_config_t *)FLASH_NFC_LOCK_PAGE_ADDR;
+    if (flash_cfg->magic != NFC_LOCK_MAGIC) {
+        memset(cfg, 0, sizeof(nfc_lock_config_t));
+        cfg->lock_mode = NFC_LOCK_MODE_DISABLED;
+        return false;
+    }
+    memcpy(cfg, flash_cfg, sizeof(nfc_lock_config_t));
+    return true;
+}
+
+bool storage_set_nfc_lock_config(const nfc_lock_config_t *cfg) {
+    if (!cfg) return false;
+    nvmc_raw_erase_page(FLASH_NFC_LOCK_PAGE_ADDR);
+
+    nfc_lock_config_t local_cfg;
+    memcpy(&local_cfg, cfg, sizeof(nfc_lock_config_t));
+    local_cfg.magic = NFC_LOCK_MAGIC;
+
+    const uint32_t *words = (const uint32_t *)&local_cfg;
+    size_t num_words = sizeof(nfc_lock_config_t) / sizeof(uint32_t);
+    for (size_t i = 0; i < num_words; i++) {
+        nvmc_raw_write_word(FLASH_NFC_LOCK_PAGE_ADDR + (i * 4U), words[i]);
+    }
+    return true;
+}
+
+void storage_disable_nfc_lock(void) {
+    nvmc_raw_erase_page(FLASH_NFC_LOCK_PAGE_ADDR);
+}
+
+static bool verify_slot_digest(uint32_t base) {
+    const app_header_t *hdr = (const app_header_t *)(base + 0x40UL);
+    if (hdr->magic != APP_HEADER_MAGIC || hdr->image_size <= 0x80UL || hdr->image_size > FLASH_SLOT_A_SIZE) {
+        return false;
+    }
+    sha256_ctx_t ctx;
+    uint8_t actual_hash[32];
+    sha256_init(&ctx);
+    sha256_update(&ctx, (const uint8_t *)base, 0x50U);
+    sha256_update(&ctx, (const uint8_t *)(base + 0x80UL), hdr->image_size - 0x80UL);
+    sha256_final(&ctx, actual_hash);
+
+    return crypto_consttime_eq(actual_hash, hdr->sha256, 32);
 }
 
 /* ==================== OTA Staging Helpers ==================== */
@@ -743,16 +879,17 @@ static uint32_t ota_get_target_base(void) {
     return (ota_get_target_slot() == 1) ? FLASH_SLOT_B_BASE : FLASH_SLOT_A_BASE;
 }
 
+static uint32_t s_ota_last_erased_page = 0xFFFFFFFFUL;
+
 bool ota_session_begin(uint8_t *cur_slot, uint8_t *tgt_slot) {
     uint8_t cur = ota_get_current_slot();
     uint8_t tgt = ota_get_target_slot();
     if (cur_slot) *cur_slot = cur;
     if (tgt_slot) *tgt_slot = tgt;
 
-    uint32_t tgt_base = ota_get_target_base();
-    for (uint32_t addr = tgt_base; addr < (tgt_base + FLASH_SLOT_A_SIZE); addr += FLASH_PAGE_SIZE) {
-        nvmc_raw_erase_page(addr);
-    }
+    /* Reset page erase tracker; pages will be erased lazily on demand during write
+     * to prevent blocking the USB bus for >2 seconds upfront */
+    s_ota_last_erased_page = 0xFFFFFFFFUL;
     dev_log(DEV_LOG_MOD_SYS, DEV_LOG_SEV_INFO, 0xE0, cur, tgt);
     return true;
 }
@@ -762,6 +899,16 @@ bool ota_session_write(uint32_t offset, const uint8_t *data, size_t len) {
         return false;
     }
     uint32_t target_addr = ota_get_target_base() + offset;
+
+    /* Erase target pages on demand as write pointer advances */
+    uint32_t start_page = target_addr & ~(FLASH_PAGE_SIZE - 1UL);
+    uint32_t end_page   = (target_addr + len - 1UL) & ~(FLASH_PAGE_SIZE - 1UL);
+    for (uint32_t p = start_page; p <= end_page; p += FLASH_PAGE_SIZE) {
+        if (p != s_ota_last_erased_page) {
+            nvmc_raw_erase_page(p);
+            s_ota_last_erased_page = p;
+        }
+    }
 
     size_t i = 0;
     while (i < len) {
@@ -790,21 +937,11 @@ bool ota_session_finalize(uint32_t total_size, const uint8_t expected_hash[32]) 
         return false;
     }
 
-    /* Verify Target Slot Application Header Magic */
+    /* Verify Target Slot Application Header Magic and Compound Digest */
     const app_header_t *new_hdr = (const app_header_t *)(tgt_base + 0x40);
-    if (new_hdr->magic != APP_HEADER_MAGIC) {
-        dev_log(DEV_LOG_MOD_SYS, DEV_LOG_SEV_ERROR, 0xE5, 0, 0);
+    if (!verify_slot_digest(tgt_base)) {
+        dev_log(DEV_LOG_MOD_SYS, DEV_LOG_SEV_ERROR, 0xE3, 1, 0);
         return false;
-    }
-
-    /* Verify embedded SHA-256 digest in header */
-    if (total_size > 0x80) {
-        uint8_t payload_hash[32];
-        sha256_hash((const uint8_t *)(tgt_base + 0x80), total_size - 0x80, payload_hash);
-        if (!crypto_consttime_eq(payload_hash, new_hdr->sha256, 32)) {
-            dev_log(DEV_LOG_MOD_SYS, DEV_LOG_SEV_ERROR, 0xE3, 1, 0);
-            return false;
-        }
     }
 
     /* Anti-Rollback Check */
@@ -956,13 +1093,9 @@ uint16_t ota_process_apdu(const uint8_t *apdu, uint16_t apdu_len, uint8_t *rsp, 
             }
 
             /* Verify target payload digest before switching */
-            if (tgt_hdr->image_size > 0x80 && tgt_hdr->image_size <= FLASH_SLOT_A_SIZE) {
-                uint8_t p_hash[32];
-                sha256_hash((const uint8_t *)(tgt_base + 0x80), tgt_hdr->image_size - 0x80, p_hash);
-                if (!crypto_consttime_eq(p_hash, tgt_hdr->sha256, 32)) {
-                    rsp[0] = 0x69; rsp[1] = 0x84; /* Data invalid */
-                    return 2;
-                }
+            if (!verify_slot_digest(tgt_base)) {
+                rsp[0] = 0x69; rsp[1] = 0x84; /* Data invalid */
+                return 2;
             }
 
             uint16_t tgt_ver = (uint16_t)(tgt_hdr->version & 0xFFFF);
@@ -987,7 +1120,7 @@ uint16_t ota_process_apdu(const uint8_t *apdu, uint16_t apdu_len, uint8_t *rsp, 
 
 > **Description:** Header Stamping & Cryptographic Image Signer  
 > **Path:** `firmware/usb_fido/patch_header.py`  
-> **Lines:** 85  
+> **Lines:** 90  
 
 ```python
 #!/usr/bin/env python3
@@ -1043,15 +1176,20 @@ def patch_binary(bin_path):
     version, sec_cnt = struct.unpack_from("<II", data, HEADER_OFFSET + 4)
     image_size = len(data)
 
-    # Compute payload SHA-256 (from offset 0x80 to EOF)
-    payload_sha256 = hashlib.sha256(data[PAYLOAD_OFFSET:]).digest()
+    # Stamp image_size first so bytes 0x00..0x4F are final
+    struct.pack_into("<I", data, HEADER_OFFSET + 12, image_size)
+
+    # Hash vectors (0x00..0x3F) + immutable header prefix (0x40..0x4F) + payload (0x80..EOF)
+    h = hashlib.sha256()
+    h.update(data[0x00 : 0x50])
+    h.update(data[PAYLOAD_OFFSET:])
+    payload_sha256 = h.digest()
 
     # Git commit and Build date
     git_commit = get_git_commit().encode("ascii").ljust(8, b"\x00")[:8]
     build_date = datetime.now().strftime("%Y%m%d").encode("ascii").ljust(8, b"\x00")[:8]
 
-    # Stamp image_size, sha256, git_commit, build_date
-    struct.pack_into("<I", data, HEADER_OFFSET + 12, image_size)
+    # Stamp sha256, git_commit, build_date
     data[HEADER_OFFSET + 16 : HEADER_OFFSET + 48] = payload_sha256
     data[HEADER_OFFSET + 48 : HEADER_OFFSET + 56] = git_commit
     data[HEADER_OFFSET + 56 : HEADER_OFFSET + 64] = build_date
@@ -1508,7 +1646,7 @@ uint16_t ccid_process_message(const uint8_t *req, uint16_t req_len, uint8_t *rsp
 
 > **Description:** USB CCID Smart Card Transport Implementation  
 > **Path:** `firmware/usb_fido/ccid/ccid.c`  
-> **Lines:** 235  
+> **Lines:** 368  
 
 ```c
 #include "ccid.h"
@@ -1517,6 +1655,7 @@ uint16_t ccid_process_message(const uint8_t *req, uint16_t req_len, uint8_t *rsp
 #include "oath/oath.h"
 #include "device_log.h"
 #include "storage_flash.h"
+#include "../pn532_nfc.h"
 #include <string.h>
 
 typedef enum {
@@ -1691,6 +1830,124 @@ uint16_t ccid_process_message(const uint8_t *req, uint16_t req_len, uint8_t *rsp
                 return 10 + apdu_rsp_len;
             }
 
+            /* Intercept Vendor APDU for NFC Tag Scan / Inspection (INS=0xEA) */
+            if (apdu_len >= 4 && apdu[1] == 0xEA) {
+                uint16_t apdu_rsp_len = pn532_scan_tag(rsp + 10, max_rsp_len - 10);
+                rsp[0] = CCID_RDR_TO_PC_DATA_BLOCK;
+                rsp[1] = (uint8_t)(apdu_rsp_len & 0xFF);
+                rsp[2] = (uint8_t)((apdu_rsp_len >> 8) & 0xFF);
+                rsp[3] = 0;
+                rsp[4] = 0;
+                rsp[5] = slot;
+                rsp[6] = seq;
+                rsp[7] = 0x00; /* Success, card active */
+                rsp[8] = 0x00;
+                rsp[9] = 0x00;
+                return 10 + apdu_rsp_len;
+            }
+
+            /* Intercept Vendor APDU for NFC Physical Presence Lock Management (INS=0xEB) */
+            if (apdu_len >= 4 && apdu[1] == 0xEB) {
+                uint8_t sub_cmd = apdu[2];
+                uint8_t mode = apdu[3];
+
+                if (sub_cmd == 0x00) {
+                    /* Query Lock Status: FF EB 00 00 */
+                    uint8_t lmode;
+                    bool locked;
+                    uint8_t ulen;
+                    uint8_t e_uid[10];
+                    uint8_t e_hash[32];
+                    pn532_get_lock_status(&lmode, &locked, &ulen, e_uid, e_hash);
+
+                    uint16_t apdu_rsp_len = 0;
+                    rsp[10 + apdu_rsp_len++] = lmode;
+                    rsp[10 + apdu_rsp_len++] = locked ? 0x01 : 0x00;
+                    rsp[10 + apdu_rsp_len++] = ulen;
+                    memcpy(rsp + 10 + apdu_rsp_len, e_uid, ulen);
+                    apdu_rsp_len += ulen;
+                    memcpy(rsp + 10 + apdu_rsp_len, e_hash, 32);
+                    apdu_rsp_len += 32;
+
+                    rsp[10 + apdu_rsp_len++] = 0x90;
+                    rsp[10 + apdu_rsp_len++] = 0x00;
+
+                    rsp[0] = CCID_RDR_TO_PC_DATA_BLOCK;
+                    rsp[1] = (uint8_t)(apdu_rsp_len & 0xFF);
+                    rsp[2] = (uint8_t)((apdu_rsp_len >> 8) & 0xFF);
+                    rsp[3] = 0; rsp[4] = 0; rsp[5] = slot; rsp[6] = seq;
+                    rsp[7] = 0x00; rsp[8] = 0x00; rsp[9] = 0x00;
+                    return 10 + apdu_rsp_len;
+                }
+
+                /* Mutating commands (Enroll 0x01, Disable 0x02) require verified Admin PIN (PW3) */
+                if (!openpgp_is_pw3_verified()) {
+                    rsp[0] = CCID_RDR_TO_PC_DATA_BLOCK;
+                    rsp[1] = 2; rsp[2] = 0; rsp[3] = 0; rsp[4] = 0;
+                    rsp[5] = slot; rsp[6] = seq; rsp[7] = 0x00; rsp[8] = 0x00; rsp[9] = 0x00;
+                    rsp[10] = 0x69; rsp[11] = 0x82; /* Security status not satisfied */
+                    return 12;
+                }
+
+                if (sub_cmd == 0x01) {
+                    /* Enroll: mode 1 = Static UID, mode 2 = EMV Crypto */
+                    uint16_t apdu_rsp_len = 0;
+                    if (mode == 0x01) {
+                        uint8_t enrolled_uid[10];
+                        uint8_t ulen = 0;
+                        if (pn532_enroll_tag_uid(enrolled_uid, &ulen)) {
+                            rsp[10 + apdu_rsp_len++] = 0x01; /* Warning: Insecure Static UID */
+                            rsp[10 + apdu_rsp_len++] = ulen;
+                            memcpy(rsp + 10 + apdu_rsp_len, enrolled_uid, ulen);
+                            apdu_rsp_len += ulen;
+                            rsp[10 + apdu_rsp_len++] = 0x90;
+                            rsp[10 + apdu_rsp_len++] = 0x00;
+                        } else {
+                            rsp[10 + apdu_rsp_len++] = 0x6A;
+                            rsp[10 + apdu_rsp_len++] = 0x80; /* Incorrect parameters / no card */
+                        }
+                    } else if (mode == 0x02) {
+                        uint8_t hash[32];
+                        if (pn532_enroll_emv_crypto(hash)) {
+                            rsp[10 + apdu_rsp_len++] = 0x00; /* Secure: Zero-clone EMV */
+                            memcpy(rsp + 10 + apdu_rsp_len, hash, 32);
+                            apdu_rsp_len += 32;
+                            rsp[10 + apdu_rsp_len++] = 0x90;
+                            rsp[10 + apdu_rsp_len++] = 0x00;
+                        } else {
+                            rsp[10 + apdu_rsp_len++] = 0x6A;
+                            rsp[10 + apdu_rsp_len++] = 0x80;
+                        }
+                    }
+                    rsp[0] = CCID_RDR_TO_PC_DATA_BLOCK;
+                    rsp[1] = (uint8_t)(apdu_rsp_len & 0xFF);
+                    rsp[2] = (uint8_t)((apdu_rsp_len >> 8) & 0xFF);
+                    rsp[3] = 0; rsp[4] = 0; rsp[5] = slot; rsp[6] = seq;
+                    rsp[7] = 0x00; rsp[8] = 0x00; rsp[9] = 0x00;
+                    return 10 + apdu_rsp_len;
+                }
+
+                if (sub_cmd == 0x02) {
+                    /* Disable Lock */
+                    pn532_disable_lock();
+                    rsp[0] = CCID_RDR_TO_PC_DATA_BLOCK;
+                    rsp[1] = 2; rsp[2] = 0; rsp[3] = 0; rsp[4] = 0;
+                    rsp[5] = slot; rsp[6] = seq; rsp[7] = 0x00; rsp[8] = 0x00; rsp[9] = 0x00;
+                    rsp[10] = 0x90; rsp[11] = 0x00;
+                    return 12;
+                }
+
+                if (sub_cmd == 0x03) {
+                    /* Lock now (re-arm lock immediately) */
+                    pn532_lock_force();
+                    rsp[0] = CCID_RDR_TO_PC_DATA_BLOCK;
+                    rsp[1] = 2; rsp[2] = 0; rsp[3] = 0; rsp[4] = 0;
+                    rsp[5] = slot; rsp[6] = seq; rsp[7] = 0x00; rsp[8] = 0x00; rsp[9] = 0x00;
+                    rsp[10] = 0x90; rsp[11] = 0x00;
+                    return 12;
+                }
+            }
+
             /* Explicit Applet Switching on SELECT AID (00 A4 04 ...) */
             if (apdu_len >= 5 && apdu[1] == 0xA4 && apdu[2] == 0x04) {
                 uint8_t aid_len = apdu[4];
@@ -1704,6 +1961,20 @@ uint16_t ccid_process_message(const uint8_t *req, uint16_t req_len, uint8_t *rsp
                 } else if (aid_len >= 6 && memcmp(aid, "\xD2\x76\x00\x01\x24\x01", 6) == 0) {
                     s_active_applet = CCID_APPLET_OPENPGP;
                     dev_log(DEV_LOG_MOD_OPENPGP, DEV_LOG_SEV_INFO, DEV_LOG_EVT_PGP_SELECT, 0, 0);
+                }
+            }
+
+            /* Check Physical Presence Lock: block cryptographic & secret operations if locked */
+            if (pn532_is_locked()) {
+                uint8_t ins = (apdu_len >= 2) ? apdu[1] : 0;
+                /* If INS is PSO (0x2A), GENERATE KEY (0x47), GENERAL AUTHENTICATE (0x87),
+                 * VERIFY (0x20), or CHANGE PIN (0x24), reject with 0x6982 */
+                if (ins == 0x2A || ins == 0x47 || ins == 0x87 || ins == 0x20 || ins == 0x24) {
+                    rsp[0] = CCID_RDR_TO_PC_DATA_BLOCK;
+                    rsp[1] = 2; rsp[2] = 0; rsp[3] = 0; rsp[4] = 0;
+                    rsp[5] = slot; rsp[6] = seq; rsp[7] = 0x00; rsp[8] = 0x00; rsp[9] = 0x00;
+                    rsp[10] = 0x69; rsp[11] = 0x82; /* Security status not satisfied: device locked */
+                    return 12;
                 }
             }
 
@@ -1755,7 +2026,7 @@ uint16_t ccid_process_message(const uint8_t *req, uint16_t req_len, uint8_t *rsp
 
 > **Description:** Firmware Entry Point, USB Stack, Interrupt Handlers  
 > **Path:** `firmware/usb_fido/main.c`  
-> **Lines:** 1303  
+> **Lines:** 1314  
 
 ```c
 #include <stdint.h>
@@ -1768,6 +2039,7 @@ uint16_t ccid_process_message(const uint8_t *req, uint16_t req_len, uint8_t *rsp
 #include "oath/oath.h"
 #include "device_log.h"
 #include "app_header.h"
+#include "pn532_nfc.h"
 
 __attribute__((section(".app_header"), used))
 const app_header_t g_app_header = {
@@ -2861,6 +3133,13 @@ int main(void) {
     ccid_init();
     uart_puts("[CCID] OpenPGP Smart Card engine initialized\r\n");
 
+    /* 3c. Initialize PN532 NFC Subsystem */
+    if (pn532_nfc_init()) {
+        uart_puts("[NFC] PN532 NFC subsystem initialized (Target + Fast Reader)\r\n");
+    } else {
+        uart_puts("[NFC] PN532 not detected or disabled\r\n");
+    }
+
     /* 4. Start 32 MHz High-Frequency Crystal (HFXO) */
     uart_puts("[CLK] Starting 32 MHz crystal oscillator (HFXO)...\r\n");
     CLOCK_EVENTS_HFCLKSTARTED = 0;
@@ -2914,9 +3193,12 @@ int main(void) {
     static bool s_btn_pressed = false;
 
     while (1) {
+        /* Run PN532 Dynamic NFC Poller (Target Mode + 15ms Reader Probe) */
+        pn532_nfc_poll();
+
         /* Check Touch / Button on P0.11 */
         if (m_usb_configured) {
-            if (P0_IN & (1UL << PIN_TOUCH)) {
+            if ((P0_IN & (1UL << PIN_TOUCH)) && !pn532_is_locked()) {
                 s_btn_counter++;
                 if (s_btn_counter > 50000 && !s_btn_pressed) {
                     s_btn_pressed = true;
@@ -3891,18 +4173,16 @@ static uint16_t handle_make_credential(const uint8_t *payload, uint16_t len, uin
             /* 4: pubKeyCredParams (array of {"type": "public-key", "alg": int}) */
             uint8_t v_major;
             uint64_t param_count;
-            if (cbor_r_get_header(&r, &v_major, &param_count) && v_major == 4) {
+            if (cbor_r_get_header(&r, &v_major, &param_count) && v_major == 4 && param_count <= 16) {
                 for (uint64_t i = 0; i < param_count; i++) {
                     uint8_t item_major;
                     uint64_t item_entries;
-                    if (cbor_r_get_header(&r, &item_major, &item_entries) && item_major == 5) {
+                    if (cbor_r_get_header(&r, &item_major, &item_entries) && item_major == 5 && item_entries <= 8) {
                         int32_t entry_alg = 0;
                         for (uint64_t p = 0; p < item_entries; p++) {
-                            uint8_t pk_major;
-                            uint64_t pk_len;
-                            if (cbor_r_get_header(&r, &pk_major, &pk_len) && pk_major == 3) {
-                                const uint8_t *k_str = r.data + r.pos;
-                                r.pos += (size_t)pk_len;
+                            const uint8_t *k_str;
+                            size_t pk_len;
+                            if (cbor_r_get_bytes(&r, 3, &k_str, &pk_len)) {
                                 if (pk_len == 3 && memcmp(k_str, "alg", 3) == 0) {
                                     uint8_t a_major;
                                     uint64_t a_val;
@@ -3911,10 +4191,10 @@ static uint16_t handle_make_credential(const uint8_t *payload, uint16_t len, uin
                                         else if (a_major == 1) entry_alg = (int32_t)(-1 - a_val);
                                     }
                                 } else {
-                                    cbor_r_skip(&r);
+                                    if (!cbor_r_skip(&r)) break;
                                 }
                             } else {
-                                cbor_r_skip(&r);
+                                if (!cbor_r_skip(&r)) break;
                             }
                         }
                         /* Preference: ML-DSA-44 (-48), ML-DSA-65 (-49), ML-DSA-87 (-50), Ed25519 (-8), ES256 (-7) */
@@ -3925,7 +4205,7 @@ static uint16_t handle_make_credential(const uint8_t *payload, uint16_t len, uin
                             }
                         }
                     } else {
-                        cbor_r_skip(&r);
+                        if (!cbor_r_skip(&r)) break;
                     }
                 }
             } else {
@@ -4036,6 +4316,7 @@ static uint16_t handle_make_credential(const uint8_t *payload, uint16_t len, uin
     cbor_w_int(&rw, 3); cbor_w_map(&rw, 0);
 
     rsp[0] = CTAP1_ERR_SUCCESS;
+    crypto_zero(cred_seed, sizeof(cred_seed));
     return (uint16_t)(rw.pos + 1);
 }
 
@@ -4090,11 +4371,11 @@ static uint16_t handle_get_assertion(const uint8_t *payload, uint16_t len, uint8
             /* 3: allowList (array of {"id": bstr, "type": "public-key"}) */
             uint8_t v_major;
             uint64_t list_count;
-            if (cbor_r_get_header(&r, &v_major, &list_count) && v_major == 4) {
+            if (cbor_r_get_header(&r, &v_major, &list_count) && v_major == 4 && list_count <= 16) {
                 for (uint64_t i = 0; i < list_count; i++) {
                     uint8_t d_major;
                     uint64_t d_entries;
-                    if (cbor_r_get_header(&r, &d_major, &d_entries) && d_major == 5) {
+                    if (cbor_r_get_header(&r, &d_major, &d_entries) && d_major == 5 && d_entries <= 8) {
                         for (uint64_t d = 0; d < d_entries; d++) {
                             const uint8_t *k_str;
                             size_t dk_len;
@@ -4215,6 +4496,7 @@ static uint16_t handle_get_assertion(const uint8_t *payload, uint16_t len, uint8
     cbor_w_bstr(&rw, sig_buf, sig_len);
 
     rsp[0] = CTAP1_ERR_SUCCESS;
+    crypto_zero(cred_seed, sizeof(cred_seed));
     return (uint16_t)(rw.pos + 1);
 }
 
@@ -4289,7 +4571,7 @@ bool openpgp_is_pw3_verified(void);
 
 > **Description:** OpenPGP Smart Card 3.4 Implementation  
 > **Path:** `firmware/usb_fido/openpgp/openpgp.c`  
-> **Lines:** 806  
+> **Lines:** 841  
 
 ```c
 #include "openpgp.h"
@@ -4699,27 +4981,12 @@ uint16_t openpgp_process_apdu(const uint8_t *apdu, uint16_t apdu_len, uint8_t *r
 
     (void)cla;
 
-    /* Parse Lc and Data pointer (Short and Extended APDUs) with strict length validation */
-    uint16_t lc = 0;
+    /* Parse Lc and Data pointer using strict ISO/IEC 7816-4 parser (Short and Extended APDUs) */
+    uint16_t lc = 0U;
     const uint8_t *data = NULL;
-    if (apdu_len > 4) {
-        if (apdu[4] == 0x00 && apdu_len >= 7) {
-            /* Extended APDU: [CLA INS P1 P2 00 B1 B2 ...DATA...] */
-            lc = ((uint16_t)apdu[5] << 8) | apdu[6];
-            if (apdu_len < (uint16_t)(7 + lc)) {
-                rsp[0] = 0x67; rsp[1] = 0x00; /* SW_WRONG_LENGTH */
-                return 2;
-            }
-            data = (lc > 0) ? &apdu[7] : NULL;
-        } else {
-            /* Short APDU: [CLA INS P1 P2 Lc ...DATA...] */
-            lc = apdu[4];
-            if (apdu_len < (uint16_t)(5 + lc)) {
-                rsp[0] = 0x67; rsp[1] = 0x00; /* SW_WRONG_LENGTH */
-                return 2;
-            }
-            data = (lc > 0) ? &apdu[5] : NULL;
-        }
+    if (!iso7816_parse_apdu(apdu, apdu_len, &data, &lc)) {
+        rsp[0] = 0x67; rsp[1] = 0x00; /* SW_WRONG_LENGTH */
+        return 2;
     }
 
     /* 1. SELECT (0xA4) */
@@ -4894,6 +5161,56 @@ uint16_t openpgp_process_apdu(const uint8_t *apdu, uint16_t apdu_len, uint8_t *r
 
         rsp[0] = 0x6A; rsp[1] = 0x88;
         return 2;
+    }
+
+    /* 3b. CHANGE REFERENCE DATA (0x24) - Supports PW1 and PW3 (Admin PIN) modification */
+    if (ins == 0x24 && p1 == 0x00 && (p2 == 0x81 || p2 == 0x83)) {
+        if (data == NULL) {
+            rsp[0] = 0x67; rsp[1] = 0x00;
+            return 2;
+        }
+        if (p2 == 0x81) {
+            /* Change PW1: data = [Old PW1 (s_pw1_len)] || [New PW1 (min 6 bytes)] */
+            if (s_pw1_tries == 0) { rsp[0] = 0x69; rsp[1] = 0x83; return 2; }
+            if (lc < (uint16_t)(s_pw1_len + 6U) || lc > (uint16_t)(s_pw1_len + sizeof(s_pw1) - 1)) {
+                rsp[0] = 0x67; rsp[1] = 0x00;
+                return 2;
+            }
+            if (!crypto_consttime_eq(data, s_pw1, s_pw1_len)) {
+                if (s_pw1_tries > 0) s_pw1_tries--;
+                storage_set_pin_retries(PIN_TYPE_PGP_PW1, s_pw1_tries);
+                rsp[0] = 0x63; rsp[1] = (uint8_t)(0xC0 | s_pw1_tries);
+                return 2;
+            }
+            uint8_t new_len = (uint8_t)(lc - s_pw1_len);
+            memcpy(s_pw1, data + s_pw1_len, new_len);
+            s_pw1_len = new_len;
+            s_pw1_tries = 3;
+            storage_set_pin_retries(PIN_TYPE_PGP_PW1, 3);
+            rsp[0] = 0x90; rsp[1] = 0x00;
+            return 2;
+        } else {
+            /* Change PW3 (Admin PIN): data = [Old PW3 (s_pw3_len)] || [New PW3 (min 8 bytes)] */
+            if (s_pw3_tries == 0) { rsp[0] = 0x69; rsp[1] = 0x83; return 2; }
+            if (lc < (uint16_t)(s_pw3_len + 8U) || lc > (uint16_t)(s_pw3_len + sizeof(s_pw3) - 1)) {
+                rsp[0] = 0x67; rsp[1] = 0x00;
+                return 2;
+            }
+            if (!crypto_consttime_eq(data, s_pw3, s_pw3_len)) {
+                if (s_pw3_tries > 0) s_pw3_tries--;
+                storage_set_pin_retries(PIN_TYPE_PGP_PW3, s_pw3_tries);
+                rsp[0] = 0x63; rsp[1] = (uint8_t)(0xC0 | s_pw3_tries);
+                return 2;
+            }
+            uint8_t new_len = (uint8_t)(lc - s_pw3_len);
+            memcpy(s_pw3, data + s_pw3_len, new_len);
+            s_pw3_len = new_len;
+            s_pw3_tries = 3;
+            s_pw3_verified = true;
+            storage_set_pin_retries(PIN_TYPE_PGP_PW3, 3);
+            rsp[0] = 0x90; rsp[1] = 0x00;
+            return 2;
+        }
     }
 
     /* 4. PUT DATA (0xDA) */
@@ -5133,7 +5450,7 @@ uint16_t piv_process_apdu(const uint8_t *apdu, uint16_t apdu_len, uint8_t *rsp, 
 
 > **Description:** PIV (NIST SP 800-73-4) Implementation  
 > **Path:** `firmware/usb_fido/piv/piv.c`  
-> **Lines:** 674  
+> **Lines:** 670  
 
 ```c
 #include "piv.h"
@@ -5394,6 +5711,7 @@ void piv_init(void) {
 
     s_piv_pin_verified = false;
     s_piv_pin_tries = storage_get_pin_retries(PIN_TYPE_PIV_PIN);
+    s_piv_puk_tries = storage_get_pin_retries(PIN_TYPE_PIV_PUK);
 }
 
 /* ==================== PIV APDU Processing ==================== */
@@ -5408,24 +5726,12 @@ uint16_t piv_process_apdu(const uint8_t *apdu, uint16_t apdu_len, uint8_t *rsp, 
     uint8_t p1  = apdu[2];
     uint8_t p2  = apdu[3];
 
-    uint16_t lc = 0;
+    /* Parse Lc and Data pointer using strict ISO/IEC 7816-4 parser (Short and Extended APDUs) */
+    uint16_t lc = 0U;
     const uint8_t *data = NULL;
-    if (apdu_len > 4) {
-        if (apdu[4] == 0x00 && apdu_len >= 7) {
-            lc = ((uint16_t)apdu[5] << 8) | apdu[6];
-            if (apdu_len < (uint16_t)(7 + lc)) {
-                rsp[0] = 0x67; rsp[1] = 0x00;
-                return 2;
-            }
-            data = (lc > 0) ? &apdu[7] : NULL;
-        } else {
-            lc = apdu[4];
-            if (apdu_len < (uint16_t)(5 + lc)) {
-                rsp[0] = 0x67; rsp[1] = 0x00;
-                return 2;
-            }
-            data = (lc > 0) ? &apdu[5] : NULL;
-        }
+    if (!iso7816_parse_apdu(apdu, apdu_len, &data, &lc)) {
+        rsp[0] = 0x67; rsp[1] = 0x00; /* SW_WRONG_LENGTH */
+        return 2;
     }
 
     /* 1. SELECT (0xA4) */
@@ -5517,6 +5823,11 @@ uint16_t piv_process_apdu(const uint8_t *apdu, uint16_t apdu_len, uint8_t *rsp, 
 
     /* 4. RESET RETRY COUNTER (0x2C) */
     if (ins == 0x2C && p2 == 0x80) {
+        if (s_piv_puk_tries == 0) {
+            rsp[0] = 0x69; rsp[1] = 0x83; /* Authentication method blocked */
+            return 2;
+        }
+
         if (lc >= 16 && data != NULL) {
             /* PUK (8) + New PIN (8) */
             uint8_t padded_puk[8];
@@ -5527,12 +5838,14 @@ uint16_t piv_process_apdu(const uint8_t *apdu, uint16_t apdu_len, uint8_t *rsp, 
                 s_piv_pin_tries = 3;
                 storage_set_pin_retries(PIN_TYPE_PIV_PIN, 3);
                 s_piv_puk_tries = 3;
+                storage_set_pin_retries(PIN_TYPE_PIV_PUK, 3);
                 s_piv_pin_verified = true;
                 rsp[0] = 0x90; rsp[1] = 0x00;
                 return 2;
             }
         }
         if (s_piv_puk_tries > 0) s_piv_puk_tries--;
+        storage_set_pin_retries(PIN_TYPE_PIV_PUK, s_piv_puk_tries);
         rsp[0] = 0x63; rsp[1] = (uint8_t)(0xC0 | s_piv_puk_tries);
         return 2;
     }
@@ -5863,12 +6176,13 @@ uint16_t oath_process_apdu(const uint8_t *apdu, uint16_t apdu_len,
 
 > **Description:** OATH TOTP/HOTP Implementation  
 > **Path:** `firmware/usb_fido/oath/oath.c`  
-> **Lines:** 291  
+> **Lines:** 293  
 
 ```c
 #include "oath.h"
 #include "sha1/sha1.h"
 #include "sha256/sha256.h"
+#include "crypto_consttime.h"
 #include <string.h>
 
 static const uint8_t s_oath_aid[7] = {
@@ -5956,11 +6270,12 @@ uint16_t oath_process_apdu(const uint8_t *apdu, uint16_t apdu_len,
         return 2;
     }
 
-    uint16_t lc = 0;
+    /* Parse Lc and Data pointer using strict ISO/IEC 7816-4 parser */
+    uint16_t lc = 0U;
     const uint8_t *data = NULL;
-    if (apdu_len >= 5) {
-        lc = apdu[4];
-        data = apdu + 5;
+    if (!iso7816_parse_apdu(apdu, apdu_len, &data, &lc)) {
+        rsp[0] = 0x67; rsp[1] = 0x00; /* SW_WRONG_LENGTH */
+        return 2;
     }
 
     /* 2. PUT (0x01): Store credential */

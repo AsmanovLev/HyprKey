@@ -256,6 +256,7 @@ void piv_init(void) {
 
     s_piv_pin_verified = false;
     s_piv_pin_tries = storage_get_pin_retries(PIN_TYPE_PIV_PIN);
+    s_piv_puk_tries = storage_get_pin_retries(PIN_TYPE_PIV_PUK);
 }
 
 /* ==================== PIV APDU Processing ==================== */
@@ -270,24 +271,12 @@ uint16_t piv_process_apdu(const uint8_t *apdu, uint16_t apdu_len, uint8_t *rsp, 
     uint8_t p1  = apdu[2];
     uint8_t p2  = apdu[3];
 
-    uint16_t lc = 0;
+    /* Parse Lc and Data pointer using strict ISO/IEC 7816-4 parser (Short and Extended APDUs) */
+    uint16_t lc = 0U;
     const uint8_t *data = NULL;
-    if (apdu_len > 4) {
-        if (apdu[4] == 0x00 && apdu_len >= 7) {
-            lc = ((uint16_t)apdu[5] << 8) | apdu[6];
-            if (apdu_len < (uint16_t)(7 + lc)) {
-                rsp[0] = 0x67; rsp[1] = 0x00;
-                return 2;
-            }
-            data = (lc > 0) ? &apdu[7] : NULL;
-        } else {
-            lc = apdu[4];
-            if (apdu_len < (uint16_t)(5 + lc)) {
-                rsp[0] = 0x67; rsp[1] = 0x00;
-                return 2;
-            }
-            data = (lc > 0) ? &apdu[5] : NULL;
-        }
+    if (!iso7816_parse_apdu(apdu, apdu_len, &data, &lc)) {
+        rsp[0] = 0x67; rsp[1] = 0x00; /* SW_WRONG_LENGTH */
+        return 2;
     }
 
     /* 1. SELECT (0xA4) */
@@ -379,6 +368,11 @@ uint16_t piv_process_apdu(const uint8_t *apdu, uint16_t apdu_len, uint8_t *rsp, 
 
     /* 4. RESET RETRY COUNTER (0x2C) */
     if (ins == 0x2C && p2 == 0x80) {
+        if (s_piv_puk_tries == 0) {
+            rsp[0] = 0x69; rsp[1] = 0x83; /* Authentication method blocked */
+            return 2;
+        }
+
         if (lc >= 16 && data != NULL) {
             /* PUK (8) + New PIN (8) */
             uint8_t padded_puk[8];
@@ -389,12 +383,14 @@ uint16_t piv_process_apdu(const uint8_t *apdu, uint16_t apdu_len, uint8_t *rsp, 
                 s_piv_pin_tries = 3;
                 storage_set_pin_retries(PIN_TYPE_PIV_PIN, 3);
                 s_piv_puk_tries = 3;
+                storage_set_pin_retries(PIN_TYPE_PIV_PUK, 3);
                 s_piv_pin_verified = true;
                 rsp[0] = 0x90; rsp[1] = 0x00;
                 return 2;
             }
         }
         if (s_piv_puk_tries > 0) s_piv_puk_tries--;
+        storage_set_pin_retries(PIN_TYPE_PIV_PUK, s_piv_puk_tries);
         rsp[0] = 0x63; rsp[1] = (uint8_t)(0xC0 | s_piv_puk_tries);
         return 2;
     }

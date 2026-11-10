@@ -61,10 +61,15 @@ static bool is_valid_image(uint32_t base) {
         return false;
     }
 
-    /* Verify payload SHA-256 integrity against stamped header */
+    /* Verify compound SHA-256 integrity (vectors 0x00..0x4F + payload 0x80..EOF) against stamped header */
     if (hdr->image_size > 0x80 && hdr->image_size <= SLOT_SIZE) {
+        sha256_ctx_t ctx;
         uint8_t actual_hash[32];
-        sha256_hash((const uint8_t *)(base + 0x80), hdr->image_size - 0x80, actual_hash);
+        sha256_init(&ctx);
+        sha256_update(&ctx, (const uint8_t *)base, 0x50U);
+        sha256_update(&ctx, (const uint8_t *)(base + 0x80UL), hdr->image_size - 0x80UL);
+        sha256_final(&ctx, actual_hash);
+
         for (int i = 0; i < 32; i++) {
             if (actual_hash[i] != hdr->sha256[i]) {
                 return false; /* Payload hash mismatch! */

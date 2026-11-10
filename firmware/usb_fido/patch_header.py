@@ -51,15 +51,20 @@ def patch_binary(bin_path):
     version, sec_cnt = struct.unpack_from("<II", data, HEADER_OFFSET + 4)
     image_size = len(data)
 
-    # Compute payload SHA-256 (from offset 0x80 to EOF)
-    payload_sha256 = hashlib.sha256(data[PAYLOAD_OFFSET:]).digest()
+    # Stamp image_size first so bytes 0x00..0x4F are final
+    struct.pack_into("<I", data, HEADER_OFFSET + 12, image_size)
+
+    # Hash vectors (0x00..0x3F) + immutable header prefix (0x40..0x4F) + payload (0x80..EOF)
+    h = hashlib.sha256()
+    h.update(data[0x00 : 0x50])
+    h.update(data[PAYLOAD_OFFSET:])
+    payload_sha256 = h.digest()
 
     # Git commit and Build date
     git_commit = get_git_commit().encode("ascii").ljust(8, b"\x00")[:8]
     build_date = datetime.now().strftime("%Y%m%d").encode("ascii").ljust(8, b"\x00")[:8]
 
-    # Stamp image_size, sha256, git_commit, build_date
-    struct.pack_into("<I", data, HEADER_OFFSET + 12, image_size)
+    # Stamp sha256, git_commit, build_date
     data[HEADER_OFFSET + 16 : HEADER_OFFSET + 48] = payload_sha256
     data[HEADER_OFFSET + 48 : HEADER_OFFSET + 56] = git_commit
     data[HEADER_OFFSET + 56 : HEADER_OFFSET + 64] = build_date

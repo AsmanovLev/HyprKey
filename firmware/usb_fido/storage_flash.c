@@ -145,6 +145,9 @@ bool storage_flash_write(uint32_t byte_offset, const void *src, size_t len) {
 
 /* ==================== Persistent Monotonic Counter & PIN Tries ==================== */
 
+#define FLASH_SIGN_CNT_PAGE_ADDR  (FLASH_USERDATA_BASE)
+#define FLASH_PIN_STATE_PAGE_ADDR (FLASH_USERDATA_BASE + FLASH_PAGE_SIZE)
+
 static uint32_t s_cached_sign_counter = 0;
 static bool s_sign_counter_initialized = false;
 
@@ -152,9 +155,9 @@ uint32_t storage_get_sign_counter(void) {
     if (s_sign_counter_initialized) {
         return s_cached_sign_counter;
     }
-    const uint32_t *log = (const uint32_t *)FLASH_USERDATA_BASE;
+    const uint32_t *log = (const uint32_t *)FLASH_SIGN_CNT_PAGE_ADDR;
     uint32_t val = 0;
-    for (uint32_t i = 0; i < 512; i++) {
+    for (uint32_t i = 0; i < 1024; i++) {
         if (log[i] == 0xFFFFFFFFUL) {
             break;
         }
@@ -170,39 +173,32 @@ uint32_t storage_get_sign_counter(void) {
 
 uint32_t storage_increment_sign_counter(void) {
     uint32_t cur = storage_get_sign_counter();
-    uint32_t next = cur + 1;
+    uint32_t next = cur + 1U;
     s_cached_sign_counter = next;
 
-    const uint32_t *log = (const uint32_t *)FLASH_USERDATA_BASE;
-    uint32_t next_idx = 512;
-    for (uint32_t i = 0; i < 512; i++) {
+    const uint32_t *log = (const uint32_t *)FLASH_SIGN_CNT_PAGE_ADDR;
+    uint32_t next_idx = 1024U;
+    for (uint32_t i = 0U; i < 1024U; i++) {
         if (log[i] == 0xFFFFFFFFUL) {
             next_idx = i;
             break;
         }
     }
 
-    if (next_idx >= 512) {
-        /* Preserve PIN retry second half before page erase */
-        uint32_t pin_half[512];
-        memcpy(pin_half, (const void *)(FLASH_USERDATA_BASE + 2048), sizeof(pin_half));
-        nvmc_raw_erase_page(FLASH_USERDATA_BASE);
-        for (uint32_t i = 0; i < 512; i++) {
-            if (pin_half[i] != 0xFFFFFFFFUL) {
-                nvmc_raw_write_word(FLASH_USERDATA_BASE + 2048 + (i * 4), pin_half[i]);
-            }
-        }
-        next_idx = 0;
+    if (next_idx >= 1024U) {
+        /* Erase only the sign counter page. PIN state on neighboring page is completely safe. */
+        nvmc_raw_erase_page(FLASH_SIGN_CNT_PAGE_ADDR);
+        next_idx = 0U;
     }
 
-    nvmc_raw_write_word(FLASH_USERDATA_BASE + (next_idx * 4), next);
+    nvmc_raw_write_word(FLASH_SIGN_CNT_PAGE_ADDR + (next_idx * 4U), next);
     return next;
 }
 
 uint8_t storage_get_pin_retries(uint8_t pin_type) {
-    const uint32_t *log = (const uint32_t *)(FLASH_USERDATA_BASE + 2048);
+    const uint32_t *log = (const uint32_t *)FLASH_PIN_STATE_PAGE_ADDR;
     uint8_t tries = 3; /* default */
-    for (uint32_t i = 0; i < 512; i++) {
+    for (uint32_t i = 0; i < 1024; i++) {
         uint32_t entry = log[i];
         if (entry == 0xFFFFFFFFUL) {
             break;
@@ -215,30 +211,85 @@ uint8_t storage_get_pin_retries(uint8_t pin_type) {
 }
 
 void storage_set_pin_retries(uint8_t pin_type, uint8_t retries) {
-    const uint32_t *log = (const uint32_t *)(FLASH_USERDATA_BASE + 2048);
-    uint32_t next_idx = 512;
-    for (uint32_t i = 0; i < 512; i++) {
+    /* Guard: Avoid unnecessary Flash writes if current retry count matches */
+    if (storage_get_pin_retries(pin_type) == retries) {
+        return;
+    }
+
+    const uint32_t *log = (const uint32_t *)FLASH_PIN_STATE_PAGE_ADDR;
+    uint32_t next_idx = 1024U;
+    for (uint32_t i = 0U; i < 1024U; i++) {
         if (log[i] == 0xFFFFFFFFUL) {
             next_idx = i;
             break;
         }
     }
 
-    if (next_idx >= 512) {
-        /* Preserve sign counter first half before page erase */
-        uint32_t sign_half[512];
-        memcpy(sign_half, (const void *)FLASH_USERDATA_BASE, sizeof(sign_half));
-        nvmc_raw_erase_page(FLASH_USERDATA_BASE);
-        for (uint32_t i = 0; i < 512; i++) {
-            if (sign_half[i] != 0xFFFFFFFFUL) {
-                nvmc_raw_write_word(FLASH_USERDATA_BASE + (i * 4), sign_half[i]);
-            }
+    if (next_idx >= 1024U) {
+        /* Compact only the 4 active counters (PW1, PW3, PIV_PIN, PIV_PUK) instead of copying old history */
+        uint8_t cur_tries[4];
+        for (uint8_t t = 0U; t < 4U; t++) {
+            cur_tries[t] = (t == pin_type) ? retries : storage_get_pin_retries(t);
         }
-        next_idx = 0;
+        nvmc_raw_erase_page(FLASH_PIN_STATE_PAGE_ADDR);
+        for (uint8_t t = 0U; t < 4U; t++) {
+            uint32_t e = ((uint32_t)t) | ((uint32_t)cur_tries[t] << 8U) | 0xFFFF0000UL;
+            nvmc_raw_write_word(FLASH_PIN_STATE_PAGE_ADDR + (t * 4U), e);
+        }
+        return;
     }
 
-    uint32_t entry = ((uint32_t)pin_type) | ((uint32_t)retries << 8) | 0xFFFF0000UL;
-    nvmc_raw_write_word(FLASH_USERDATA_BASE + 2048 + (next_idx * 4), entry);
+    uint32_t entry = ((uint32_t)pin_type) | ((uint32_t)retries << 8U) | 0xFFFF0000UL;
+    nvmc_raw_write_word(FLASH_PIN_STATE_PAGE_ADDR + (next_idx * 4U), entry);
+}
+
+/* ==================== NFC Physical Presence Lock Configuration Storage ==================== */
+
+bool storage_get_nfc_lock_config(nfc_lock_config_t *cfg) {
+    if (!cfg) return false;
+    const nfc_lock_config_t *flash_cfg = (const nfc_lock_config_t *)FLASH_NFC_LOCK_PAGE_ADDR;
+    if (flash_cfg->magic != NFC_LOCK_MAGIC) {
+        memset(cfg, 0, sizeof(nfc_lock_config_t));
+        cfg->lock_mode = NFC_LOCK_MODE_DISABLED;
+        return false;
+    }
+    memcpy(cfg, flash_cfg, sizeof(nfc_lock_config_t));
+    return true;
+}
+
+bool storage_set_nfc_lock_config(const nfc_lock_config_t *cfg) {
+    if (!cfg) return false;
+    nvmc_raw_erase_page(FLASH_NFC_LOCK_PAGE_ADDR);
+
+    nfc_lock_config_t local_cfg;
+    memcpy(&local_cfg, cfg, sizeof(nfc_lock_config_t));
+    local_cfg.magic = NFC_LOCK_MAGIC;
+
+    const uint32_t *words = (const uint32_t *)&local_cfg;
+    size_t num_words = sizeof(nfc_lock_config_t) / sizeof(uint32_t);
+    for (size_t i = 0; i < num_words; i++) {
+        nvmc_raw_write_word(FLASH_NFC_LOCK_PAGE_ADDR + (i * 4U), words[i]);
+    }
+    return true;
+}
+
+void storage_disable_nfc_lock(void) {
+    nvmc_raw_erase_page(FLASH_NFC_LOCK_PAGE_ADDR);
+}
+
+static bool verify_slot_digest(uint32_t base) {
+    const app_header_t *hdr = (const app_header_t *)(base + 0x40UL);
+    if (hdr->magic != APP_HEADER_MAGIC || hdr->image_size <= 0x80UL || hdr->image_size > FLASH_SLOT_A_SIZE) {
+        return false;
+    }
+    sha256_ctx_t ctx;
+    uint8_t actual_hash[32];
+    sha256_init(&ctx);
+    sha256_update(&ctx, (const uint8_t *)base, 0x50U);
+    sha256_update(&ctx, (const uint8_t *)(base + 0x80UL), hdr->image_size - 0x80UL);
+    sha256_final(&ctx, actual_hash);
+
+    return crypto_consttime_eq(actual_hash, hdr->sha256, 32);
 }
 
 /* ==================== OTA Staging Helpers ==================== */
@@ -292,16 +343,17 @@ static uint32_t ota_get_target_base(void) {
     return (ota_get_target_slot() == 1) ? FLASH_SLOT_B_BASE : FLASH_SLOT_A_BASE;
 }
 
+static uint32_t s_ota_last_erased_page = 0xFFFFFFFFUL;
+
 bool ota_session_begin(uint8_t *cur_slot, uint8_t *tgt_slot) {
     uint8_t cur = ota_get_current_slot();
     uint8_t tgt = ota_get_target_slot();
     if (cur_slot) *cur_slot = cur;
     if (tgt_slot) *tgt_slot = tgt;
 
-    uint32_t tgt_base = ota_get_target_base();
-    for (uint32_t addr = tgt_base; addr < (tgt_base + FLASH_SLOT_A_SIZE); addr += FLASH_PAGE_SIZE) {
-        nvmc_raw_erase_page(addr);
-    }
+    /* Reset page erase tracker; pages will be erased lazily on demand during write
+     * to prevent blocking the USB bus for >2 seconds upfront */
+    s_ota_last_erased_page = 0xFFFFFFFFUL;
     dev_log(DEV_LOG_MOD_SYS, DEV_LOG_SEV_INFO, 0xE0, cur, tgt);
     return true;
 }
@@ -311,6 +363,16 @@ bool ota_session_write(uint32_t offset, const uint8_t *data, size_t len) {
         return false;
     }
     uint32_t target_addr = ota_get_target_base() + offset;
+
+    /* Erase target pages on demand as write pointer advances */
+    uint32_t start_page = target_addr & ~(FLASH_PAGE_SIZE - 1UL);
+    uint32_t end_page   = (target_addr + len - 1UL) & ~(FLASH_PAGE_SIZE - 1UL);
+    for (uint32_t p = start_page; p <= end_page; p += FLASH_PAGE_SIZE) {
+        if (p != s_ota_last_erased_page) {
+            nvmc_raw_erase_page(p);
+            s_ota_last_erased_page = p;
+        }
+    }
 
     size_t i = 0;
     while (i < len) {
@@ -339,21 +401,11 @@ bool ota_session_finalize(uint32_t total_size, const uint8_t expected_hash[32]) 
         return false;
     }
 
-    /* Verify Target Slot Application Header Magic */
+    /* Verify Target Slot Application Header Magic and Compound Digest */
     const app_header_t *new_hdr = (const app_header_t *)(tgt_base + 0x40);
-    if (new_hdr->magic != APP_HEADER_MAGIC) {
-        dev_log(DEV_LOG_MOD_SYS, DEV_LOG_SEV_ERROR, 0xE5, 0, 0);
+    if (!verify_slot_digest(tgt_base)) {
+        dev_log(DEV_LOG_MOD_SYS, DEV_LOG_SEV_ERROR, 0xE3, 1, 0);
         return false;
-    }
-
-    /* Verify embedded SHA-256 digest in header */
-    if (total_size > 0x80) {
-        uint8_t payload_hash[32];
-        sha256_hash((const uint8_t *)(tgt_base + 0x80), total_size - 0x80, payload_hash);
-        if (!crypto_consttime_eq(payload_hash, new_hdr->sha256, 32)) {
-            dev_log(DEV_LOG_MOD_SYS, DEV_LOG_SEV_ERROR, 0xE3, 1, 0);
-            return false;
-        }
     }
 
     /* Anti-Rollback Check */
@@ -505,13 +557,9 @@ uint16_t ota_process_apdu(const uint8_t *apdu, uint16_t apdu_len, uint8_t *rsp, 
             }
 
             /* Verify target payload digest before switching */
-            if (tgt_hdr->image_size > 0x80 && tgt_hdr->image_size <= FLASH_SLOT_A_SIZE) {
-                uint8_t p_hash[32];
-                sha256_hash((const uint8_t *)(tgt_base + 0x80), tgt_hdr->image_size - 0x80, p_hash);
-                if (!crypto_consttime_eq(p_hash, tgt_hdr->sha256, 32)) {
-                    rsp[0] = 0x69; rsp[1] = 0x84; /* Data invalid */
-                    return 2;
-                }
+            if (!verify_slot_digest(tgt_base)) {
+                rsp[0] = 0x69; rsp[1] = 0x84; /* Data invalid */
+                return 2;
             }
 
             uint16_t tgt_ver = (uint16_t)(tgt_hdr->version & 0xFFFF);

@@ -8,6 +8,7 @@
 #include "oath/oath.h"
 #include "device_log.h"
 #include "app_header.h"
+#include "pn532_nfc.h"
 
 __attribute__((section(".app_header"), used))
 const app_header_t g_app_header = {
@@ -1101,6 +1102,13 @@ int main(void) {
     ccid_init();
     uart_puts("[CCID] OpenPGP Smart Card engine initialized\r\n");
 
+    /* 3c. Initialize PN532 NFC Subsystem */
+    if (pn532_nfc_init()) {
+        uart_puts("[NFC] PN532 NFC subsystem initialized (Target + Fast Reader)\r\n");
+    } else {
+        uart_puts("[NFC] PN532 not detected or disabled\r\n");
+    }
+
     /* 4. Start 32 MHz High-Frequency Crystal (HFXO) */
     uart_puts("[CLK] Starting 32 MHz crystal oscillator (HFXO)...\r\n");
     CLOCK_EVENTS_HFCLKSTARTED = 0;
@@ -1154,9 +1162,12 @@ int main(void) {
     static bool s_btn_pressed = false;
 
     while (1) {
+        /* Run PN532 Dynamic NFC Poller (Target Mode + 15ms Reader Probe) */
+        pn532_nfc_poll();
+
         /* Check Touch / Button on P0.11 */
         if (m_usb_configured) {
-            if (P0_IN & (1UL << PIN_TOUCH)) {
+            if ((P0_IN & (1UL << PIN_TOUCH)) && !pn532_is_locked()) {
                 s_btn_counter++;
                 if (s_btn_counter > 50000 && !s_btn_pressed) {
                     s_btn_pressed = true;
