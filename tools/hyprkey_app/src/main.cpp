@@ -35,6 +35,25 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
     // Enable DPI awareness
     ImGui_ImplWin32_EnableDpiAwareness();
 
+    // Detect theme from executable filename
+    WCHAR exePath[MAX_PATH];
+    GetModuleFileNameW(NULL, exePath, MAX_PATH);
+    _wcslwr_s(exePath);
+
+    AppTheme initTheme = THEME_LINEAR;
+    const wchar_t* titleName = L"HyprKey Manager [Linear Stealth]";
+
+    if (wcsstr(exePath, L"catppuccin")) {
+        initTheme = THEME_CATPPUCCIN;
+        titleName = L"HyprKey Manager [Catppuccin Mocha]";
+    } else if (wcsstr(exePath, L"nordic")) {
+        initTheme = THEME_NORDIC;
+        titleName = L"HyprKey Manager [Nordic Waybar]";
+    } else if (wcsstr(exePath, L"industrial")) {
+        initTheme = THEME_INDUSTRIAL;
+        titleName = L"HyprKey Manager [Industrial Amber]";
+    }
+
     // Create application window
     WNDCLASSEXW wc = {
         sizeof(wc),
@@ -59,7 +78,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 
     HWND hwnd = ::CreateWindowW(
         wc.lpszClassName,
-        L"HyprKey Manager",
+        titleName,
         WS_OVERLAPPEDWINDOW,
         pos_x, pos_y, window_width, window_height,
         nullptr, nullptr, wc.hInstance, nullptr
@@ -87,8 +106,38 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
     ImGuiIO& io = ImGui::GetIO(); (void)io;
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
 
-    // Setup Hyprland Tokyo-Night Theme
-    ApplyHyprTheme();
+    // Setup High-DPI Cyrillic + Latin Fonts
+    ImFontConfig font_cfg;
+    font_cfg.OversampleH = 2;
+    font_cfg.OversampleV = 2;
+    static const ImWchar glyph_ranges[] = {
+        0x0020, 0x00FF, // Basic Latin + Latin Supplement
+        0x0400, 0x052F, // Cyrillic + Cyrillic Supplement
+        0x2DE0, 0x2DFF, // Cyrillic Extended-A
+        0xA640, 0xA69F, // Cyrillic Extended-B
+        0,
+    };
+
+    if (initTheme == THEME_NORDIC) {
+        g_FontUI = io.Fonts->AddFontFromFileTTF("C:\\Windows\\Fonts\\CascadiaCode.ttf", 17.0f, &font_cfg, glyph_ranges);
+    } else {
+        g_FontUI = io.Fonts->AddFontFromFileTTF("C:\\Windows\\Fonts\\segoeui.ttf", 18.0f, &font_cfg, glyph_ranges);
+    }
+
+    g_FontMono = io.Fonts->AddFontFromFileTTF("C:\\Windows\\Fonts\\CascadiaCode.ttf", 17.0f, &font_cfg, glyph_ranges);
+    if (!g_FontMono) {
+        g_FontMono = io.Fonts->AddFontFromFileTTF("C:\\Windows\\Fonts\\consola.ttf", 17.0f, &font_cfg, glyph_ranges);
+    }
+
+    g_FontTitle = io.Fonts->AddFontFromFileTTF("C:\\Windows\\Fonts\\segoeuib.ttf", 22.0f, &font_cfg, glyph_ranges);
+    if (!g_FontTitle) {
+        g_FontTitle = io.Fonts->AddFontFromFileTTF("C:\\Windows\\Fonts\\segoeui.ttf", 22.0f, &font_cfg, glyph_ranges);
+    }
+
+    g_FontTotpCode = io.Fonts->AddFontFromFileTTF("C:\\Windows\\Fonts\\CascadiaCode.ttf", 32.0f, &font_cfg, glyph_ranges);
+
+    // Apply Active Theme
+    ApplyTheme(initTheme);
 
     // Setup Platform/Renderer backends
     ImGui_ImplWin32_Init(hwnd);
@@ -121,7 +170,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
         }
         g_SwapChainOccluded = false;
 
-        // Handle window resize (we don't resize directly in the WM_SIZE handler)
+        // Handle window resize
         if (g_ResizeWidth != 0 && g_ResizeHeight != 0)
         {
             CleanupRenderTarget();
@@ -130,10 +179,12 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
             CreateRenderTarget();
         }
 
-        // Start the Dear ImGui frame
+        // Start Dear ImGui frame
         ImGui_ImplDX11_NewFrame();
         ImGui_ImplWin32_NewFrame();
         ImGui::NewFrame();
+
+        if (g_FontUI) ImGui::PushFont(g_FontUI);
 
         // Fullscreen dock/window canvas covering entire client rect
         ImGui::SetNextWindowPos(ImVec2(0, 0));
@@ -153,9 +204,12 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
         ImGui::End();
         ImGui::PopStyleVar(2);
 
+        if (g_FontUI) ImGui::PopFont();
+
         // Rendering
         ImGui::Render();
-        const float clear_color[4] = { 0.09f, 0.10f, 0.13f, 1.00f };
+        ImVec4 cc = GetThemeClearColor(g_CurrentTheme);
+        const float clear_color[4] = { cc.x, cc.y, cc.z, cc.w };
         g_pd3dDeviceContext->OMSetRenderTargets(1, &g_mainRenderTargetView, nullptr);
         g_pd3dDeviceContext->ClearRenderTargetView(g_mainRenderTargetView, clear_color);
         ImGui_ImplDX11_RenderDrawData(ImGui::GetDrawData());
@@ -181,7 +235,6 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
 // Helper functions
 bool CreateDeviceD3D(HWND hWnd)
 {
-    // Setup swap chain
     DXGI_SWAP_CHAIN_DESC sd;
     ZeroMemory(&sd, sizeof(sd));
     sd.BufferCount = 2;
@@ -214,7 +267,7 @@ bool CreateDeviceD3D(HWND hWnd)
         &featureLevel,
         &g_pd3dDeviceContext
     );
-    if (res == DXGI_ERROR_UNSUPPORTED) // Fallback to WARP if hardware not available
+    if (res == DXGI_ERROR_UNSUPPORTED)
         res = D3D11CreateDeviceAndSwapChain(
             nullptr,
             D3D_DRIVER_TYPE_WARP,
@@ -259,10 +312,8 @@ void CleanupRenderTarget()
     if (g_mainRenderTargetView) { g_mainRenderTargetView->Release(); g_mainRenderTargetView = nullptr; }
 }
 
-// Forward declare message handler from imgui_impl_win32.cpp
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
-// Win32 message handler
 LRESULT WINAPI WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
     if (ImGui_ImplWin32_WndProcHandler(hWnd, msg, wParam, lParam))
@@ -277,7 +328,7 @@ LRESULT WINAPI WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
         g_ResizeHeight = (UINT)HIWORD(lParam);
         return 0;
     case WM_SYSCOMMAND:
-        if ((wParam & 0xfff0) == SC_KEYMENU) // Disable ALT application menu
+        if ((wParam & 0xfff0) == SC_KEYMENU)
             return 0;
         break;
     case WM_DESTROY:
