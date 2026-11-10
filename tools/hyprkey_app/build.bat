@@ -9,7 +9,7 @@ cd /d "%~dp0"
 if not exist bin mkdir bin
 if not exist obj mkdir obj
 
-echo [HyprKey Build] Compiling C/C++ sources (ImGui + Quirc QR + HyprKey App)...
+echo [HyprKey Build] Compiling C/C++ sources (ImGui + Quirc QR + M3 HyprKey App)...
 
 set CFLAGS=/std:c++20 /O2 /EHsc /MD /W3 /DUNICODE /D_UNICODE /DNDEBUG /I"imgui" /I"quirc" /I"src" /Fo"obj\\" /c
 set C_FLAGS=/O2 /MD /W3 /DNDEBUG /I"quirc" /Fo"obj\\" /c
@@ -50,12 +50,12 @@ if %ERRORLEVEL% NEQ 0 (
     exit /b %ERRORLEVEL%
 )
 
-echo [HyprKey Build] Generating 5 theme editions...
+echo [HyprKey Build] Generating Material 3 and theme editions...
+copy /Y "bin\hyprkey.exe" "bin\hyprkey_md3.exe" >nul
+copy /Y "bin\hyprkey.exe" "bin\hyprkey_md3_blue.exe" >nul
 copy /Y "bin\hyprkey.exe" "bin\hyprkey_nothing.exe" >nul
 copy /Y "bin\hyprkey.exe" "bin\hyprkey_circuit.exe" >nul
 copy /Y "bin\hyprkey.exe" "bin\hyprkey_linear.exe" >nul
-copy /Y "bin\hyprkey.exe" "bin\hyprkey_catppuccin.exe" >nul
-copy /Y "bin\hyprkey.exe" "bin\hyprkey_industrial.exe" >nul
 
-echo [HyprKey Build] SUCCESS: All 5 editions created in bin\
+echo [HyprKey Build] SUCCESS: All Material 3 editions created in bin\
 dir /b bin\*.exe

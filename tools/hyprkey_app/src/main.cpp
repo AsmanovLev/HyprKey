@@ -40,21 +40,21 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, PWSTR pCmdLine
     GetModuleFileNameW(NULL, exePath, MAX_PATH);
     _wcslwr_s(exePath);
 
-    AppTheme initTheme = THEME_NOTHING;
-    const wchar_t* titleName = L"HyprKey [Nothing OS Glyph Edition]";
+    AppTheme initTheme = THEME_MD3;
+    const wchar_t* titleName = L"HyprKey [Material 3 Lavender Edition]";
 
-    if (wcsstr(exePath, L"circuit")) {
+    if (wcsstr(exePath, L"blue") || wcsstr(exePath, L"pixel")) {
+        initTheme = THEME_MD3_BLUE;
+        titleName = L"HyprKey [Material 3 Pixel Blue Edition]";
+    } else if (wcsstr(exePath, L"nothing")) {
+        initTheme = THEME_NOTHING;
+        titleName = L"HyprKey [Nothing OS Glyph Edition]";
+    } else if (wcsstr(exePath, L"circuit")) {
         initTheme = THEME_CIRCUIT;
         titleName = L"HyprKey [Cyber Circuit PCB Edition]";
     } else if (wcsstr(exePath, L"linear")) {
         initTheme = THEME_LINEAR;
         titleName = L"HyprKey [Linear Stealth Edition]";
-    } else if (wcsstr(exePath, L"catppuccin")) {
-        initTheme = THEME_CATPPUCCIN;
-        titleName = L"HyprKey [Catppuccin Mocha Edition]";
-    } else if (wcsstr(exePath, L"industrial")) {
-        initTheme = THEME_INDUSTRIAL;
-        titleName = L"HyprKey [Industrial Amber Edition]";
     }
 
     // Create application window

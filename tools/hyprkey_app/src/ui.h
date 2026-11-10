@@ -4,11 +4,11 @@
 #include "imgui.h"
 
 enum AppTheme {
-    THEME_NOTHING = 0,    // Nothing OS Glyph Bento (Pitch Black + Nothing Red)
-    THEME_CIRCUIT,        // Cyber Circuit / Silicon PCB (Matte Solder Mask + Emerald/Copper Traces)
-    THEME_LINEAR,         // Linear Stealth (Minimalist Obsidian + Mint)
-    THEME_CATPPUCCIN,     // Catppuccin Mocha (Soft Pastel Dark)
-    THEME_INDUSTRIAL,     // Industrial Amber (Teenage Engineering Carbon)
+    THEME_MD3 = 0,        // Material Design 3 (Material You Lavender)
+    THEME_MD3_BLUE,       // Material Design 3 (Pixel Google Blue)
+    THEME_NOTHING,        // Nothing OS Glyph
+    THEME_CIRCUIT,        // Cyber Circuit PCB
+    THEME_LINEAR,         // Linear Stealth
     THEME_COUNT
 };
 
