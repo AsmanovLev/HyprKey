@@ -30,6 +30,34 @@ static inline void crypto_zero(void *ptr, size_t len) {
 }
 
 /**
+ * Hardware True Random Number Generator (TRNG) on nRF52840.
+ * Directly reads entropy from silicon noise generator with Bias Correction.
+ */
+#define HW_RNG_BASE_ADDR        0x4000D000UL
+#define HW_RNG_TASKS_START      (*(volatile uint32_t *)(HW_RNG_BASE_ADDR + 0x000))
+#define HW_RNG_TASKS_STOP       (*(volatile uint32_t *)(HW_RNG_BASE_ADDR + 0x004))
+#define HW_RNG_EVENTS_VALRDY    (*(volatile uint32_t *)(HW_RNG_BASE_ADDR + 0x100))
+#define HW_RNG_CONFIG           (*(volatile uint32_t *)(HW_RNG_BASE_ADDR + 0x504))
+#define HW_RNG_VALUE            (*(volatile uint32_t *)(HW_RNG_BASE_ADDR + 0x508))
+
+static inline int hw_trng_get_bytes(uint8_t *dest, unsigned size) {
+    HW_RNG_CONFIG = 1UL; /* Enable Digital Error Correction */
+    HW_RNG_TASKS_START = 1UL;
+    while (size--) {
+        HW_RNG_EVENTS_VALRDY = 0UL;
+        uint32_t timeout = 100000UL;
+        while (!HW_RNG_EVENTS_VALRDY && --timeout);
+        if (timeout == 0UL) {
+            HW_RNG_TASKS_STOP = 1UL;
+            return 0;
+        }
+        *dest++ = (uint8_t)HW_RNG_VALUE;
+    }
+    HW_RNG_TASKS_STOP = 1UL;
+    return 1;
+}
+
+/**
  * Strict ISO/IEC 7816-4 APDU parser.
  * Accurately parses Cases 1, 2S, 2E, 3S, 3E, 4S, 4E, correctly separating Lc data from Le.
  */

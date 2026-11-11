@@ -90,14 +90,18 @@ def main():
     btc_nested = bytes(resp[idx:idx+nest_len]).decode('ascii'); idx += nest_len
     seg_len = resp[idx]; idx += 1
     btc_bech32 = bytes(resp[idx:idx+seg_len]).decode('ascii'); idx += seg_len
+    tap_len = resp[idx]; idx += 1
+    btc_taproot = bytes(resp[idx:idx+tap_len]).decode('ascii'); idx += tap_len
     print(f"[+] Bitcoin Public Key (33B):            {compressed_pubkey.hex()}")
     print(f"[+] Bitcoin Chain Code (32B):            {chain_code.hex()}")
     print(f"[+] Bitcoin Legacy (P2PKH, 1...):        {btc_legacy}")
     print(f"[+] Bitcoin Nested SegWit (BIP-49, 3...): {btc_nested}")
-    print(f"[+] Bitcoin Native SegWit (BIP-84, bc1): {btc_bech32}")
+    print(f"[+] Bitcoin Native SegWit (BIP-84, bc1q): {btc_bech32}")
+    print(f"[+] Bitcoin Taproot (BIP-86, bc1p...):   {btc_taproot}")
     assert btc_legacy.startswith("1")
     assert btc_nested.startswith("3")
     assert btc_bech32.startswith("bc1q")
+    assert btc_taproot.startswith("bc1p"), f"Expected bc1p, got {btc_taproot}"
 
     # 6. DERIVE ETHEREUM / EVM ADDRESS (m/44'/60'/0'/0/0) [ETH, BNB, POL, USDT-ERC20/BEP20]
     print("\n--- 6. DERIVE ETHEREUM / EVM ADDRESS (m/44'/60'/0'/0/0) ---")
@@ -183,8 +187,17 @@ def main():
     assert addr_str.startswith("4"), "Monero Mainnet address must start with 4"
     assert addr_len == 95, f"Expected 95 chars, got {addr_len}"
 
-    # 12. TEST USER PRESENCE TOUCH ON TRANSACTION SIGNING
-    print("\n--- 12. TEST USER PRESENCE ON SIGNING (P0.11 TOUCH) ---")
+    # 12. GET HARDWARE TRNG ENTROPY (NRF_RNG)
+    print("\n--- 12. GET HARDWARE TRNG ENTROPY (NRF_RNG) ---")
+    resp, sw1, sw2 = conn.transmit([0xB0, 0x84, 0x00, 0x00, 0x20]) # Request 32 bytes
+    print(f"SW: {sw1:02X}{sw2:02X} | Length: {len(resp)} bytes")
+    assert (sw1, sw2) == (0x90, 0x00)
+    assert len(resp) == 32
+    trng_entropy = bytes(resp)
+    print(f"[+] Silicon Hardware TRNG Entropy (32B): {trng_entropy.hex()}")
+
+    # 13. TEST USER PRESENCE TOUCH ON TRANSACTION SIGNING
+    print("\n--- 13. TEST USER PRESENCE ON SIGNING (P0.11 TOUCH) ---")
     # First test: Without touching (should timeout after 3s with SW=6985)
     print("[*] Testing Touch Timeout (Do NOT touch the key)...")
     t0 = time.time()

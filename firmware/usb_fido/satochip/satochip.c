@@ -104,6 +104,20 @@ static void secp256k1_add_mod_n(const uint8_t a[32], const uint8_t b[32], uint8_
     }
 }
 
+static void secp256k1_neg_mod_n(const uint8_t a[32], uint8_t res[32]) {
+    uint32_t borrow = 0;
+    for (int i = 31; i >= 0; i--) {
+        int32_t diff = (int32_t)SECP256K1_N[i] - (int32_t)a[i] - (int32_t)borrow;
+        if (diff < 0) {
+            diff += 256;
+            borrow = 1;
+        } else {
+            borrow = 0;
+        }
+        res[i] = (uint8_t)diff;
+    }
+}
+
 /* ==================== BIP-32 & SLIP-0010 Key Derivation ==================== */
 
 static bool derive_bip32_key(const uint32_t *path, uint8_t depth,
@@ -316,7 +330,7 @@ static uint32_t bech32_polymod_step(uint32_t pre) {
            (-((b >> 4) & 1) & 0x2A1462B3UL);
 }
 
-static void bech32_encode(const char *hrp, uint8_t witver, const uint8_t *prog, size_t prog_len, char *out) {
+static void bech32_encode(const char *hrp, uint8_t witver, const uint8_t *prog, size_t prog_len, char *out, bool is_bech32m) {
     uint32_t chk = 1;
     size_t out_len = 0;
 
@@ -354,11 +368,11 @@ static void bech32_encode(const char *hrp, uint8_t witver, const uint8_t *prog, 
         out[out_len++] = BECH32_CHARSET[val];
     }
 
-    /* 6 checksum characters */
+    /* 6 checksum characters (Bech32 uses 1, Bech32m uses 0x2BC40E71) */
     for (int i = 0; i < 6; i++) {
         chk = bech32_polymod_step(chk);
     }
-    chk ^= 1;
+    chk ^= (is_bech32m ? 0x2BC40E71UL : 1UL);
     for (int i = 0; i < 6; i++) {
         out[out_len++] = BECH32_CHARSET[(chk >> ((5 - i) * 5)) & 0x1F];
     }
@@ -616,7 +630,7 @@ uint16_t satochip_process_apdu(const uint8_t *apdu, uint16_t apdu_len, uint8_t *
                 base58check_encode(0x32, red_r, 20, ltc_nested);
 
                 char ltc_bech32[64];
-                bech32_encode("ltc", 0, r160, 20, ltc_bech32);
+                bech32_encode("ltc", 0, r160, 20, ltc_bech32, false);
 
                 memcpy(rsp, comp_pub, 33);
                 out_len = 33;
@@ -654,7 +668,40 @@ uint16_t satochip_process_apdu(const uint8_t *apdu, uint16_t apdu_len, uint8_t *
                 base58check_encode(0x05, red_r, 20, btc_nested);
 
                 char btc_bech32[64];
-                bech32_encode("bc", 0, r160, 20, btc_bech32);
+                bech32_encode("bc", 0, r160, 20, btc_bech32, false);
+
+                /* 4. Taproot Address (BIP-86 Bech32m): bc1p... */
+                uint8_t d_tap[32];
+                if (pub[63] & 1) {
+                    secp256k1_neg_mod_n(child_priv, d_tap);
+                } else {
+                    memcpy(d_tap, child_priv, 32);
+                }
+
+                static const uint8_t TAPTWEAK_TAG_HASH[32] = {
+                    0xe8, 0x0f, 0xe1, 0x63, 0x9c, 0x9c, 0xa0, 0x50,
+                    0xe3, 0xaf, 0x1b, 0x39, 0xc1, 0x43, 0xc6, 0x3e,
+                    0x42, 0x9c, 0xbc, 0xeb, 0x15, 0xd9, 0x40, 0xfb,
+                    0xb5, 0xc5, 0xa1, 0xf4, 0xaf, 0x57, 0xc5, 0xe9
+                };
+                sha256_ctx_t tap_ctx;
+                sha256_init(&tap_ctx);
+                sha256_update(&tap_ctx, TAPTWEAK_TAG_HASH, 32);
+                sha256_update(&tap_ctx, TAPTWEAK_TAG_HASH, 32);
+                sha256_update(&tap_ctx, pub, 32); /* P_x */
+                uint8_t tweak[32];
+                sha256_final(&tap_ctx, tweak);
+
+                uint8_t d_tweaked[32];
+                secp256k1_add_mod_n(d_tap, tweak, d_tweaked);
+
+                uint8_t tap_point[64];
+                uECC_compute_public_key(d_tweaked, tap_point, uECC_secp256k1());
+
+                char btc_taproot[64];
+                bech32_encode("bc", 1, tap_point, 32, btc_taproot, true /* is_bech32m */);
+                crypto_zero(d_tap, sizeof(d_tap));
+                crypto_zero(d_tweaked, sizeof(d_tweaked));
 
                 uint8_t len1 = (uint8_t)strlen(btc_legacy);
                 rsp[out_len++] = len1;
@@ -665,6 +712,9 @@ uint16_t satochip_process_apdu(const uint8_t *apdu, uint16_t apdu_len, uint8_t *
                 uint8_t len3 = (uint8_t)strlen(btc_bech32);
                 rsp[out_len++] = len3;
                 memcpy(rsp + out_len, btc_bech32, len3); out_len += len3;
+                uint8_t len4 = (uint8_t)strlen(btc_taproot);
+                rsp[out_len++] = len4;
+                memcpy(rsp + out_len, btc_taproot, len4); out_len += len4;
             } else if (p1 == 0x01) {
                 /* Uncompressed (65B: 04 || X || Y) */
                 rsp[0] = 0x04;
@@ -756,6 +806,19 @@ uint16_t satochip_process_apdu(const uint8_t *apdu, uint16_t apdu_len, uint8_t *
         rsp[out_len++] = 0x00;
         dev_log(DEV_LOG_MOD_SYS, DEV_LOG_SEV_INFO, 0x5A, 4, is_ed25519);
         return out_len;
+    }
+
+    /* 8. GET HARDWARE TRNG ENTROPY (B0 84 00 00 <bytes_len>) */
+    if (ins == 0x84) {
+        uint8_t req_len = (lc > 0 && data) ? data[0] : (apdu_len > 4 ? apdu[4] : 32);
+        if (req_len == 0 || req_len > 64) req_len = 32;
+        if (!hw_trng_get_bytes(rsp, req_len)) {
+            rsp[0] = 0x6F; rsp[1] = 0x00;
+            return 2;
+        }
+        rsp[req_len] = 0x90;
+        rsp[req_len + 1] = 0x00;
+        return req_len + 2;
     }
 
     /* Unsupported Satochip Command */
