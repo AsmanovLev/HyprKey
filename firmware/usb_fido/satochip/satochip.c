@@ -303,6 +303,68 @@ static void base58check_encode(uint8_t version, const uint8_t *payload, size_t p
     base58_encode(buf, 1 + payload_len + 4, out);
 }
 
+/* ==================== BIP-173 Bech32 Encoder (Native SegWit) ==================== */
+static const char BECH32_CHARSET[] = "qpzry9x8gf2tvdw0s3jn54khce6mua7l";
+
+static uint32_t bech32_polymod_step(uint32_t pre) {
+    uint8_t b = (uint8_t)(pre >> 25);
+    return ((pre & 0x1FFFFFFUL) << 5) ^
+           (-((b >> 0) & 1) & 0x3B6A57B2UL) ^
+           (-((b >> 1) & 1) & 0x26508E6DUL) ^
+           (-((b >> 2) & 1) & 0x1EA119FAUL) ^
+           (-((b >> 3) & 1) & 0x3D4233DDUL) ^
+           (-((b >> 4) & 1) & 0x2A1462B3UL);
+}
+
+static void bech32_encode(const char *hrp, uint8_t witver, const uint8_t *prog, size_t prog_len, char *out) {
+    uint32_t chk = 1;
+    size_t out_len = 0;
+
+    for (size_t i = 0; hrp[i]; i++) {
+        chk = bech32_polymod_step(chk) ^ (uint32_t)(hrp[i] >> 5);
+        out[out_len++] = hrp[i];
+    }
+    chk = bech32_polymod_step(chk);
+    out[out_len++] = '1';
+
+    for (size_t i = 0; hrp[i]; i++) {
+        chk = bech32_polymod_step(chk) ^ (uint32_t)(hrp[i] & 0x1F);
+    }
+
+    /* Witness version */
+    chk = bech32_polymod_step(chk) ^ witver;
+    out[out_len++] = BECH32_CHARSET[witver];
+
+    /* 8-bit to 5-bit conversion */
+    uint32_t acc = 0;
+    int bits = 0;
+    for (size_t i = 0; i < prog_len; i++) {
+        acc = (acc << 8) | prog[i];
+        bits += 8;
+        while (bits >= 5) {
+            bits -= 5;
+            uint8_t val = (acc >> bits) & 0x1F;
+            chk = bech32_polymod_step(chk) ^ val;
+            out[out_len++] = BECH32_CHARSET[val];
+        }
+    }
+    if (bits > 0) {
+        uint8_t val = (acc << (5 - bits)) & 0x1F;
+        chk = bech32_polymod_step(chk) ^ val;
+        out[out_len++] = BECH32_CHARSET[val];
+    }
+
+    /* 6 checksum characters */
+    for (int i = 0; i < 6; i++) {
+        chk = bech32_polymod_step(chk);
+    }
+    chk ^= 1;
+    for (int i = 0; i < 6; i++) {
+        out[out_len++] = BECH32_CHARSET[(chk >> ((5 - i) * 5)) & 0x1F];
+    }
+    out[out_len] = '\0';
+}
+
 uint16_t satochip_process_apdu(const uint8_t *apdu, uint16_t apdu_len, uint8_t *rsp, uint16_t max_rsp_len) {
     if (apdu_len < 4) {
         rsp[0] = 0x6E; rsp[1] = 0x00; /* Class not supported */
@@ -534,34 +596,75 @@ uint16_t satochip_process_apdu(const uint8_t *apdu, uint16_t apdu_len, uint8_t *
                 memcpy(rsp + 21, trx_addr, tlen);
                 out_len = 21 + tlen;
             } else if (p1 == 0x07 || (depth > 1 && path[1] == 0x80000002UL)) {
-                /* Litecoin (LTC): Base58Check(0x30 || RIPEMD160(SHA256(compressed_pub))) */
+                /* Litecoin (LTC): Returns Compressed Pubkey + Legacy(L...) + Nested SegWit(M...) + Native SegWit(ltc1q...) */
                 uint8_t comp_pub[33];
                 uECC_compress(pub, comp_pub, uECC_secp256k1());
                 uint8_t s256[32], r160[20];
                 sha256_hash(comp_pub, 33, s256);
                 ripemd160(s256, 32, r160);
-                char ltc_addr[64];
-                base58check_encode(0x30, r160, 20, ltc_addr);
-                uint8_t llen = (uint8_t)strlen(ltc_addr);
+
+                char ltc_legacy[64];
+                base58check_encode(0x30, r160, 20, ltc_legacy);
+
+                uint8_t redeem[22];
+                redeem[0] = 0x00; redeem[1] = 0x14;
+                memcpy(redeem + 2, r160, 20);
+                uint8_t red_s[32], red_r[20];
+                sha256_hash(redeem, 22, red_s);
+                ripemd160(red_s, 32, red_r);
+                char ltc_nested[64];
+                base58check_encode(0x32, red_r, 20, ltc_nested);
+
+                char ltc_bech32[64];
+                bech32_encode("ltc", 0, r160, 20, ltc_bech32);
+
                 memcpy(rsp, comp_pub, 33);
-                rsp[33] = llen;
-                memcpy(rsp + 34, ltc_addr, llen);
-                out_len = 34 + llen;
+                out_len = 33;
+                uint8_t len1 = (uint8_t)strlen(ltc_legacy);
+                rsp[out_len++] = len1;
+                memcpy(rsp + out_len, ltc_legacy, len1); out_len += len1;
+                uint8_t len2 = (uint8_t)strlen(ltc_nested);
+                rsp[out_len++] = len2;
+                memcpy(rsp + out_len, ltc_nested, len2); out_len += len2;
+                uint8_t len3 = (uint8_t)strlen(ltc_bech32);
+                rsp[out_len++] = len3;
+                memcpy(rsp + out_len, ltc_bech32, len3); out_len += len3;
             } else if (p1 == 0x00) {
-                /* Bitcoin (BTC): Compressed (33B) + Chaincode (32B) + P2PKH Addr */
-                uECC_compress(pub, rsp, uECC_secp256k1());
+                /* Bitcoin (BTC): Returns Compressed Pubkey + Chaincode + Legacy(1...) + Nested SegWit(3...) + Native SegWit(bc1q...) */
+                uint8_t comp_pub[33];
+                uECC_compress(pub, comp_pub, uECC_secp256k1());
+                memcpy(rsp, comp_pub, 33);
                 memcpy(rsp + 33, child_chain, 32);
                 out_len = 65;
 
                 uint8_t s256[32], r160[20];
-                sha256_hash(rsp, 33, s256);
+                sha256_hash(comp_pub, 33, s256);
                 ripemd160(s256, 32, r160);
-                char btc_addr[64];
-                base58check_encode(0x00, r160, 20, btc_addr);
-                uint8_t blen = (uint8_t)strlen(btc_addr);
-                rsp[out_len++] = blen;
-                memcpy(rsp + out_len, btc_addr, blen);
-                out_len += blen;
+
+                char btc_legacy[64];
+                base58check_encode(0x00, r160, 20, btc_legacy);
+
+                uint8_t redeem[22];
+                redeem[0] = 0x00; redeem[1] = 0x14;
+                memcpy(redeem + 2, r160, 20);
+                uint8_t red_s[32], red_r[20];
+                sha256_hash(redeem, 22, red_s);
+                ripemd160(red_s, 32, red_r);
+                char btc_nested[64];
+                base58check_encode(0x05, red_r, 20, btc_nested);
+
+                char btc_bech32[64];
+                bech32_encode("bc", 0, r160, 20, btc_bech32);
+
+                uint8_t len1 = (uint8_t)strlen(btc_legacy);
+                rsp[out_len++] = len1;
+                memcpy(rsp + out_len, btc_legacy, len1); out_len += len1;
+                uint8_t len2 = (uint8_t)strlen(btc_nested);
+                rsp[out_len++] = len2;
+                memcpy(rsp + out_len, btc_nested, len2); out_len += len2;
+                uint8_t len3 = (uint8_t)strlen(btc_bech32);
+                rsp[out_len++] = len3;
+                memcpy(rsp + out_len, btc_bech32, len3); out_len += len3;
             } else if (p1 == 0x01) {
                 /* Uncompressed (65B: 04 || X || Y) */
                 rsp[0] = 0x04;

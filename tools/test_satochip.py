@@ -75,20 +75,29 @@ def main():
     assert (sw1, sw2) == (0x90, 0x00), f"Seed import failed: {sw1:02X}{sw2:02X}"
     print("[+] Master seed imported successfully!")
 
-    # 5. DERIVE BITCOIN PUBLIC KEY & ADDRESS (m/44'/0'/0'/0/0)
-    print("\n--- 5. DERIVE BITCOIN KEY & ADDRESS (m/44'/0'/0'/0/0) ---")
+    # 5. DERIVE BITCOIN (BTC) ADDRESSES (Legacy, Nested SegWit, Native SegWit Bech32)
+    print("\n--- 5. DERIVE BITCOIN (BTC) ADDRESSES (m/44'/0'/0'/0/0) ---")
     btc_path = encode_bip32_path([0x8000002C, 0x80000000, 0x80000000, 0, 0])
     resp, sw1, sw2 = conn.transmit([0xB0, 0x6C, 0x00, 0x00, len(btc_path)] + btc_path + [0x00])
     print(f"SW: {sw1:02X}{sw2:02X} | Length: {len(resp)} bytes")
     assert (sw1, sw2) == (0x90, 0x00)
     compressed_pubkey = bytes(resp[:33])
     chain_code = bytes(resp[33:65])
-    btc_addr_len = resp[65]
-    btc_addr = bytes(resp[66:66+btc_addr_len]).decode('ascii')
-    print(f"[+] Bitcoin Public Key (compressed 33B): {compressed_pubkey.hex()}")
+    idx = 65
+    leg_len = resp[idx]; idx += 1
+    btc_legacy = bytes(resp[idx:idx+leg_len]).decode('ascii'); idx += leg_len
+    nest_len = resp[idx]; idx += 1
+    btc_nested = bytes(resp[idx:idx+nest_len]).decode('ascii'); idx += nest_len
+    seg_len = resp[idx]; idx += 1
+    btc_bech32 = bytes(resp[idx:idx+seg_len]).decode('ascii'); idx += seg_len
+    print(f"[+] Bitcoin Public Key (33B):            {compressed_pubkey.hex()}")
     print(f"[+] Bitcoin Chain Code (32B):            {chain_code.hex()}")
-    print(f"[+] Bitcoin P2PKH Address:               {btc_addr}")
-    assert btc_addr.startswith("1"), f"Expected 1..., got {btc_addr}"
+    print(f"[+] Bitcoin Legacy (P2PKH, 1...):        {btc_legacy}")
+    print(f"[+] Bitcoin Nested SegWit (BIP-49, 3...): {btc_nested}")
+    print(f"[+] Bitcoin Native SegWit (BIP-84, bc1): {btc_bech32}")
+    assert btc_legacy.startswith("1")
+    assert btc_nested.startswith("3")
+    assert btc_bech32.startswith("bc1q")
 
     # 6. DERIVE ETHEREUM / EVM ADDRESS (m/44'/60'/0'/0/0) [ETH, BNB, POL, USDT-ERC20/BEP20]
     print("\n--- 6. DERIVE ETHEREUM / EVM ADDRESS (m/44'/60'/0'/0/0) ---")
@@ -134,19 +143,27 @@ def main():
     assert trx_addr.startswith("T"), f"Expected T..., got {trx_addr}"
     assert trx_len == 34, f"Expected 34 chars, got {trx_len}"
 
-    # 10. DERIVE LITECOIN (LTC) ADDRESS (m/44'/2'/0'/0/0)
-    print("\n--- 10. DERIVE LITECOIN (LTC) (m/44'/2'/0'/0/0) ---")
+    # 10. DERIVE LITECOIN (LTC) ADDRESSES (Legacy, Nested SegWit, Native SegWit Bech32)
+    print("\n--- 10. DERIVE LITECOIN (LTC) ADDRESSES (m/44'/2'/0'/0/0) ---")
     ltc_path = encode_bip32_path([0x8000002C, 0x80000002, 0x80000000, 0, 0])
     resp, sw1, sw2 = conn.transmit([0xB0, 0x6C, 0x07, 0x00, len(ltc_path)] + ltc_path + [0x00])
     print(f"SW: {sw1:02X}{sw2:02X} | Length: {len(resp)} bytes")
     assert (sw1, sw2) == (0x90, 0x00)
     ltc_pub = bytes(resp[:33])
-    ltc_len = resp[33]
-    ltc_addr = bytes(resp[34:34+ltc_len]).decode('ascii')
+    idx = 33
+    leg_len = resp[idx]; idx += 1
+    ltc_legacy = bytes(resp[idx:idx+leg_len]).decode('ascii'); idx += leg_len
+    nest_len = resp[idx]; idx += 1
+    ltc_nested = bytes(resp[idx:idx+nest_len]).decode('ascii'); idx += nest_len
+    seg_len = resp[idx]; idx += 1
+    ltc_bech32 = bytes(resp[idx:idx+seg_len]).decode('ascii'); idx += seg_len
     print(f"[+] Litecoin Compressed Pubkey (33B):    {ltc_pub.hex()}")
-    print(f"[+] Litecoin Legacy Address (L...):      {ltc_addr}")
-    assert ltc_addr.startswith("L"), f"Expected L..., got {ltc_addr}"
-    assert ltc_len == 34, f"Expected 34 chars, got {ltc_len}"
+    print(f"[+] Litecoin Legacy (P2PKH, L...):        {ltc_legacy}")
+    print(f"[+] Litecoin Nested SegWit (BIP-49, M...): {ltc_nested}")
+    print(f"[+] Litecoin Native SegWit (BIP-84, ltc1): {ltc_bech32}")
+    assert ltc_legacy.startswith("L")
+    assert ltc_nested.startswith("M")
+    assert ltc_bech32.startswith("ltc1q")
 
     # 11. DERIVE MONERO (XMR) KEYS & ADDRESS (m/44'/128'/0')
     print("\n--- 11. DERIVE MONERO (XMR) KEYS & ADDRESS (m/44'/128'/0') ---")
