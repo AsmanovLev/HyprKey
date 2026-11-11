@@ -5,6 +5,7 @@
 #include "fips202/fips202.h"
 #include "sha512/sha512.h"
 #include "sha256/sha256.h"
+#include "ripemd160/ripemd160.h"
 #include "storage_flash.h"
 #include "crypto_consttime.h"
 #include "device_log.h"
@@ -259,6 +260,49 @@ static void monero_base58_encode(const uint8_t *data, size_t len, char *out) {
     *ptr = '\0';
 }
 
+/* ==================== Standard Bitcoin / Tron / Litecoin Base58 ==================== */
+static const char BASE58_ALPHABET[] = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+
+static void base58_encode(const uint8_t *data, size_t len, char *out) {
+    uint8_t digits[128] = {0};
+    size_t digits_len = 1;
+
+    for (size_t i = 0; i < len; i++) {
+        uint32_t carry = data[i];
+        for (size_t j = 0; j < digits_len; j++) {
+            carry += (uint32_t)digits[j] << 8;
+            digits[j] = (uint8_t)(carry % 58);
+            carry /= 58;
+        }
+        while (carry > 0) {
+            digits[digits_len++] = (uint8_t)(carry % 58);
+            carry /= 58;
+        }
+    }
+
+    size_t out_idx = 0;
+    for (size_t i = 0; i < len && data[i] == 0; i++) {
+        out[out_idx++] = '1';
+    }
+    for (size_t i = 0; i < digits_len; i++) {
+        out[out_idx++] = BASE58_ALPHABET[digits[digits_len - 1 - i]];
+    }
+    out[out_idx] = '\0';
+}
+
+static void base58check_encode(uint8_t version, const uint8_t *payload, size_t payload_len, char *out) {
+    uint8_t buf[64];
+    buf[0] = version;
+    memcpy(buf + 1, payload, payload_len);
+
+    uint8_t h1[32], h2[32];
+    sha256_hash(buf, 1 + payload_len, h1);
+    sha256_hash(h1, 32, h2);
+
+    memcpy(buf + 1 + payload_len, h2, 4);
+    base58_encode(buf, 1 + payload_len + 4, out);
+}
+
 uint16_t satochip_process_apdu(const uint8_t *apdu, uint16_t apdu_len, uint8_t *rsp, uint16_t max_rsp_len) {
     if (apdu_len < 4) {
         rsp[0] = 0x6E; rsp[1] = 0x00; /* Class not supported */
@@ -384,11 +428,14 @@ uint16_t satochip_process_apdu(const uint8_t *apdu, uint16_t apdu_len, uint8_t *
     }
 
     /* 6. GET BIP32 PUBLIC KEY / ADDRESS (B0 6C P1 P2)
-     * P1 = 0x00: Compressed secp256k1 (33B) + Chaincode (32B) [Bitcoin format]
+     * P1 = 0x00: Bitcoin (BTC): Compressed (33B) + Chaincode (32B) + AddrLen(1B) + Legacy Addr (1...)
      * P1 = 0x01: Uncompressed secp256k1 (65B: 04 || X || Y)
-     * P1 = 0x02: Ethereum Address (20B)
-     * P1 = 0x03: Ed25519 Public Key (32B) [Solana / TON]
-     * P1 = 0x05: Monero Keys & Address [SpendPub(32) || ViewPub(32) || ViewSec(32) || AddrLen(1) || Addr(95)]
+     * P1 = 0x02: Ethereum (ETH/BSC/POL): Address (20B)
+     * P1 = 0x03: Solana (SOL): Ed25519 Pubkey (32B) + AddrLen(1B) + Base58 Addr
+     * P1 = 0x04: TON: Ed25519 Pubkey (32B)
+     * P1 = 0x05: Monero (XMR): SpendPub(32) || ViewPub(32) || ViewSec(32) || AddrLen(1) || Addr(95)
+     * P1 = 0x06: Tron (TRX / USDT-TRC20): Raw(20B) + AddrLen(1B) + Base58Check Addr (T...)
+     * P1 = 0x07: Litecoin (LTC): Compressed (33B) + AddrLen(1B) + Base58Check Addr (L...)
      */
     if (ins == 0x6C) {
         if (lc < 4 || (lc % 4) != 0) {
@@ -405,7 +452,7 @@ uint16_t satochip_process_apdu(const uint8_t *apdu, uint16_t apdu_len, uint8_t *
         }
 
         bool is_monero = (p1 == 0x05) || (depth > 1 && path[1] == 0x80000080UL); /* 128' (Monero) */
-        bool is_ed25519 = is_monero || (p1 == 0x03) || (depth > 1 && (path[1] == 0x800001F5UL || path[1] == 0x8000018CUL)); /* 501' (Solana) or 396' (TON) */
+        bool is_ed25519 = is_monero || (p1 == 0x03) || (p1 == 0x04) || (depth > 1 && (path[1] == 0x800001F5UL || path[1] == 0x8000018CUL)); /* 501' (Solana) or 396' (TON) */
 
         uint8_t child_priv[32];
         uint8_t child_chain[32];
@@ -461,16 +508,60 @@ uint16_t satochip_process_apdu(const uint8_t *apdu, uint16_t apdu_len, uint8_t *
             ed25519_create_keypair(pk, sk, child_priv);
             memcpy(rsp, pk, 32);
             out_len = 32;
+            if (p1 == 0x03 || (depth > 1 && path[1] == 0x800001F5UL)) {
+                /* Solana: append Base58 address string */
+                char sol_b58[64];
+                base58_encode(pk, 32, sol_b58);
+                uint8_t slen = (uint8_t)strlen(sol_b58);
+                rsp[32] = slen;
+                memcpy(rsp + 33, sol_b58, slen);
+                out_len = 33 + slen;
+            }
             crypto_zero(sk, sizeof(sk));
         } else {
             uint8_t pub[64];
             uECC_compute_public_key(child_priv, pub, uECC_secp256k1());
 
-            if (p1 == 0x00) {
-                /* Compressed (33B) + Chaincode (32B) */
+            if (p1 == 0x06 || (depth > 1 && path[1] == 0x800000C3UL)) {
+                /* Tron (TRX / USDT-TRC20): Base58Check(0x41 || Keccak256(pub)[12..31]) */
+                uint8_t eth_hash[32];
+                keccak_256(pub, 64, eth_hash);
+                char trx_addr[64];
+                base58check_encode(0x41, eth_hash + 12, 20, trx_addr);
+                uint8_t tlen = (uint8_t)strlen(trx_addr);
+                memcpy(rsp, eth_hash + 12, 20);
+                rsp[20] = tlen;
+                memcpy(rsp + 21, trx_addr, tlen);
+                out_len = 21 + tlen;
+            } else if (p1 == 0x07 || (depth > 1 && path[1] == 0x80000002UL)) {
+                /* Litecoin (LTC): Base58Check(0x30 || RIPEMD160(SHA256(compressed_pub))) */
+                uint8_t comp_pub[33];
+                uECC_compress(pub, comp_pub, uECC_secp256k1());
+                uint8_t s256[32], r160[20];
+                sha256_hash(comp_pub, 33, s256);
+                ripemd160(s256, 32, r160);
+                char ltc_addr[64];
+                base58check_encode(0x30, r160, 20, ltc_addr);
+                uint8_t llen = (uint8_t)strlen(ltc_addr);
+                memcpy(rsp, comp_pub, 33);
+                rsp[33] = llen;
+                memcpy(rsp + 34, ltc_addr, llen);
+                out_len = 34 + llen;
+            } else if (p1 == 0x00) {
+                /* Bitcoin (BTC): Compressed (33B) + Chaincode (32B) + P2PKH Addr */
                 uECC_compress(pub, rsp, uECC_secp256k1());
                 memcpy(rsp + 33, child_chain, 32);
                 out_len = 65;
+
+                uint8_t s256[32], r160[20];
+                sha256_hash(rsp, 33, s256);
+                ripemd160(s256, 32, r160);
+                char btc_addr[64];
+                base58check_encode(0x00, r160, 20, btc_addr);
+                uint8_t blen = (uint8_t)strlen(btc_addr);
+                rsp[out_len++] = blen;
+                memcpy(rsp + out_len, btc_addr, blen);
+                out_len += blen;
             } else if (p1 == 0x01) {
                 /* Uncompressed (65B: 04 || X || Y) */
                 rsp[0] = 0x04;

@@ -75,37 +75,81 @@ def main():
     assert (sw1, sw2) == (0x90, 0x00), f"Seed import failed: {sw1:02X}{sw2:02X}"
     print("[+] Master seed imported successfully!")
 
-    # 5. DERIVE BITCOIN PUBLIC KEY (m/44'/0'/0'/0/0)
-    print("\n--- 5. DERIVE BITCOIN KEY (m/44'/0'/0'/0/0) ---")
+    # 5. DERIVE BITCOIN PUBLIC KEY & ADDRESS (m/44'/0'/0'/0/0)
+    print("\n--- 5. DERIVE BITCOIN KEY & ADDRESS (m/44'/0'/0'/0/0) ---")
     btc_path = encode_bip32_path([0x8000002C, 0x80000000, 0x80000000, 0, 0])
     resp, sw1, sw2 = conn.transmit([0xB0, 0x6C, 0x00, 0x00, len(btc_path)] + btc_path + [0x00])
     print(f"SW: {sw1:02X}{sw2:02X} | Length: {len(resp)} bytes")
     assert (sw1, sw2) == (0x90, 0x00)
     compressed_pubkey = bytes(resp[:33])
     chain_code = bytes(resp[33:65])
+    btc_addr_len = resp[65]
+    btc_addr = bytes(resp[66:66+btc_addr_len]).decode('ascii')
     print(f"[+] Bitcoin Public Key (compressed 33B): {compressed_pubkey.hex()}")
     print(f"[+] Bitcoin Chain Code (32B):            {chain_code.hex()}")
+    print(f"[+] Bitcoin P2PKH Address:               {btc_addr}")
+    assert btc_addr.startswith("1"), f"Expected 1..., got {btc_addr}"
 
-    # 6. DERIVE ETHEREUM ADDRESS (m/44'/60'/0'/0/0)
-    print("\n--- 6. DERIVE ETHEREUM ADDRESS (m/44'/60'/0'/0/0) ---")
+    # 6. DERIVE ETHEREUM / EVM ADDRESS (m/44'/60'/0'/0/0) [ETH, BNB, POL, USDT-ERC20/BEP20]
+    print("\n--- 6. DERIVE ETHEREUM / EVM ADDRESS (m/44'/60'/0'/0/0) ---")
     eth_path = encode_bip32_path([0x8000002C, 0x8000003C, 0x80000000, 0, 0])
     resp, sw1, sw2 = conn.transmit([0xB0, 0x6C, 0x02, 0x00, len(eth_path)] + eth_path + [0x00])
     print(f"SW: {sw1:02X}{sw2:02X} | Length: {len(resp)} bytes")
     assert (sw1, sw2) == (0x90, 0x00)
     eth_address = "0x" + bytes(resp[:20]).hex()
-    print(f"[+] Ethereum Address: {eth_address}")
+    print(f"[+] EVM Address (ETH, BNB, POL, Base, Arb): {eth_address}")
 
-    # 7. DERIVE SOLANA ED25519 PUBLIC KEY (m/44'/501'/0'/0')
-    print("\n--- 7. DERIVE SOLANA ED25519 PUBKEY (m/44'/501'/0'/0') ---")
+    # 7. DERIVE SOLANA ED25519 & BASE58 ADDRESS (m/44'/501'/0'/0') [SOL, USDT-SPL]
+    print("\n--- 7. DERIVE SOLANA ED25519 & BASE58 (m/44'/501'/0'/0') ---")
     sol_path = encode_bip32_path([0x8000002C, 0x800001F5, 0x80000000, 0x80000000])
     resp, sw1, sw2 = conn.transmit([0xB0, 0x6C, 0x03, 0x00, len(sol_path)] + sol_path + [0x00])
     print(f"SW: {sw1:02X}{sw2:02X} | Length: {len(resp)} bytes")
     assert (sw1, sw2) == (0x90, 0x00)
     sol_pubkey = bytes(resp[:32])
-    print(f"[+] Solana Public Key (Ed25519 32B): {sol_pubkey.hex()}")
+    sol_addr_len = resp[32]
+    sol_addr = bytes(resp[33:33+sol_addr_len]).decode('ascii')
+    print(f"[+] Solana Public Key (Ed25519 32B):      {sol_pubkey.hex()}")
+    print(f"[+] Solana Base58 Address ({sol_addr_len} chars):       {sol_addr}")
 
-    # 8. DERIVE MONERO (XMR) KEYS & ADDRESS (m/44'/128'/0')
-    print("\n--- 8. DERIVE MONERO (XMR) KEYS & ADDRESS (m/44'/128'/0') ---")
+    # 8. DERIVE TON ED25519 PUBKEY (m/44'/396'/0'/0') [TON, USDT-Jetton]
+    print("\n--- 8. DERIVE TON ED25519 PUBKEY (m/44'/396'/0'/0') ---")
+    ton_path = encode_bip32_path([0x8000002C, 0x8000018C, 0x80000000, 0x80000000])
+    resp, sw1, sw2 = conn.transmit([0xB0, 0x6C, 0x04, 0x00, len(ton_path)] + ton_path + [0x00])
+    print(f"SW: {sw1:02X}{sw2:02X} | Length: {len(resp)} bytes")
+    assert (sw1, sw2) == (0x90, 0x00)
+    ton_pubkey = bytes(resp[:32])
+    print(f"[+] TON Public Key (Ed25519 32B):         {ton_pubkey.hex()}")
+
+    # 9. DERIVE TRON (TRX / USDT-TRC20) ADDRESS (m/44'/195'/0'/0/0)
+    print("\n--- 9. DERIVE TRON (TRX / USDT-TRC20) (m/44'/195'/0'/0/0) ---")
+    trx_path = encode_bip32_path([0x8000002C, 0x800000C3, 0x80000000, 0, 0])
+    resp, sw1, sw2 = conn.transmit([0xB0, 0x6C, 0x06, 0x00, len(trx_path)] + trx_path + [0x00])
+    print(f"SW: {sw1:02X}{sw2:02X} | Length: {len(resp)} bytes")
+    assert (sw1, sw2) == (0x90, 0x00)
+    trx_raw = bytes(resp[:20])
+    trx_len = resp[20]
+    trx_addr = bytes(resp[21:21+trx_len]).decode('ascii')
+    print(f"[+] Tron Raw Address (20B):              0x{trx_raw.hex()}")
+    print(f"[+] Tron Base58Check Address (T...):     {trx_addr}")
+    assert trx_addr.startswith("T"), f"Expected T..., got {trx_addr}"
+    assert trx_len == 34, f"Expected 34 chars, got {trx_len}"
+
+    # 10. DERIVE LITECOIN (LTC) ADDRESS (m/44'/2'/0'/0/0)
+    print("\n--- 10. DERIVE LITECOIN (LTC) (m/44'/2'/0'/0/0) ---")
+    ltc_path = encode_bip32_path([0x8000002C, 0x80000002, 0x80000000, 0, 0])
+    resp, sw1, sw2 = conn.transmit([0xB0, 0x6C, 0x07, 0x00, len(ltc_path)] + ltc_path + [0x00])
+    print(f"SW: {sw1:02X}{sw2:02X} | Length: {len(resp)} bytes")
+    assert (sw1, sw2) == (0x90, 0x00)
+    ltc_pub = bytes(resp[:33])
+    ltc_len = resp[33]
+    ltc_addr = bytes(resp[34:34+ltc_len]).decode('ascii')
+    print(f"[+] Litecoin Compressed Pubkey (33B):    {ltc_pub.hex()}")
+    print(f"[+] Litecoin Legacy Address (L...):      {ltc_addr}")
+    assert ltc_addr.startswith("L"), f"Expected L..., got {ltc_addr}"
+    assert ltc_len == 34, f"Expected 34 chars, got {ltc_len}"
+
+    # 11. DERIVE MONERO (XMR) KEYS & ADDRESS (m/44'/128'/0')
+    print("\n--- 11. DERIVE MONERO (XMR) KEYS & ADDRESS (m/44'/128'/0') ---")
     xmr_path = encode_bip32_path([0x8000002C, 0x80000080, 0x80000000])
     resp, sw1, sw2 = conn.transmit([0xB0, 0x6C, 0x05, 0x00, len(xmr_path)] + xmr_path + [0x00])
     print(f"SW: {sw1:02X}{sw2:02X} | Length: {len(resp)} bytes")
@@ -115,15 +159,15 @@ def main():
     view_sec  = bytes(resp[64:96])
     addr_len  = resp[96]
     addr_str  = bytes(resp[97:97+addr_len]).decode('ascii')
-    print(f"[+] Monero Spend Public Key (32B): {spend_pub.hex()}")
-    print(f"[+] Monero View Public Key  (32B): {view_pub.hex()}")
-    print(f"[+] Monero View Private Key (32B): {view_sec.hex()} (Exported for view-only wallet sync)")
-    print(f"[+] Monero Mainnet Address ({addr_len} chars): {addr_str}")
+    print(f"[+] Monero Spend Public Key (32B):       {spend_pub.hex()}")
+    print(f"[+] Monero View Public Key  (32B):       {view_pub.hex()}")
+    print(f"[+] Monero View Private Key (32B):       {view_sec.hex()} (Exported for view-only wallet sync)")
+    print(f"[+] Monero Mainnet Address ({addr_len} chars):     {addr_str}")
     assert addr_str.startswith("4"), "Monero Mainnet address must start with 4"
     assert addr_len == 95, f"Expected 95 chars, got {addr_len}"
 
-    # 9. TEST USER PRESENCE TOUCH ON TRANSACTION SIGNING
-    print("\n--- 9. TEST USER PRESENCE ON SIGNING (P0.11 TOUCH) ---")
+    # 12. TEST USER PRESENCE TOUCH ON TRANSACTION SIGNING
+    print("\n--- 12. TEST USER PRESENCE ON SIGNING (P0.11 TOUCH) ---")
     # First test: Without touching (should timeout after 3s with SW=6985)
     print("[*] Testing Touch Timeout (Do NOT touch the key)...")
     t0 = time.time()

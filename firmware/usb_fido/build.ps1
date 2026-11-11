@@ -3,8 +3,8 @@ $objcopy = "D:\STM32CubeIDE_2.0.0\STM32CubeIDE\plugins\com.st.stm32cube.ide.mcu.
 
 Set-Location "S:\hyprkey\firmware\usb_fido"
 
-$c_sources = "main.c device_log.c storage_flash.c fido_u2f.c ctap2.c ccid/ccid.c openpgp/openpgp.c piv/piv.c mldsa/mldsa.c mlkem/mlkem.c fips202/fips202.c micro_ecc/uECC.c sha256/sha256.c sha512/sha512.c ed25519/ed25519.c sha1/sha1.c oath/oath.c pn532_nfc.c satochip/satochip.c"
-$common_flags = "-mcpu=cortex-m4 -mthumb -mfloat-abi=hard -mfpu=fpv4-sp-d16 -Os -g -Wall -Wextra -Wno-unused-parameter -ffunction-sections -fdata-sections -nostartfiles -Wl,--gc-sections -DuECC_SUPPORTS_secp160r1=0 -DuECC_SUPPORTS_secp192r1=0 -DuECC_SUPPORTS_secp224r1=0 -DuECC_SUPPORTS_secp256r1=1 -DuECC_SUPPORTS_secp256k1=1 -DuECC_OPTIMIZATION_LEVEL=3 -DuECC_SQUARE_FUNC=1 -I. -Imicro_ecc -Isha256 -Imldsa -Imlkem -Ifips202 -Iccid -Iopenpgp -Ipiv -Isha512 -Ied25519 -Ioath -Isha1 -Isatochip"
+$c_sources = "main.c device_log.c storage_flash.c fido_u2f.c ctap2.c ccid/ccid.c openpgp/openpgp.c piv/piv.c mldsa/mldsa.c mlkem/mlkem.c fips202/fips202.c micro_ecc/uECC.c sha256/sha256.c sha512/sha512.c ed25519/ed25519.c sha1/sha1.c oath/oath.c pn532_nfc.c satochip/satochip.c ripemd160/ripemd160.c"
+$common_flags = "-mcpu=cortex-m4 -mthumb -mfloat-abi=hard -mfpu=fpv4-sp-d16 -Os -g -Wall -Wextra -Wno-unused-parameter -ffunction-sections -fdata-sections -nostartfiles -Wl,--gc-sections -DuECC_SUPPORTS_secp160r1=0 -DuECC_SUPPORTS_secp192r1=0 -DuECC_SUPPORTS_secp224r1=0 -DuECC_SUPPORTS_secp256r1=1 -DuECC_SUPPORTS_secp256k1=1 -DuECC_OPTIMIZATION_LEVEL=3 -DuECC_SQUARE_FUNC=1 -I. -Imicro_ecc -Isha256 -Imldsa -Imlkem -Ifips202 -Iccid -Iopenpgp -Ipiv -Isha512 -Ied25519 -Ioath -Isha1 -Isatochip -Iripemd160"
 
 Write-Host ">>> Compiling Slot A Firmware (0x00028000)..."
 $args_a = ($common_flags -split ' ') + @("-T", "linker_slot_a.ld") + ($c_sources -split ' ') + @("-lgcc", "-o", "usb_fido_slot_a.elf")
