@@ -273,3 +273,16 @@ void ed25519_sign(uint8_t sig[64], const uint8_t *msg, size_t msg_len,
     }
     modL(sig + 32, x);
 }
+
+void ed25519_sc_reduce32(uint8_t s[32]) {
+    uint8_t tmp[64] = {0};
+    memcpy(tmp, s, 32);
+    reduce(tmp);
+    memcpy(s, tmp, 32);
+}
+
+void ed25519_scalarmult_base(uint8_t out[32], const uint8_t scalar[32]) {
+    gf P[4];
+    scalarbase(P, scalar);
+    pack(out, P);
+}

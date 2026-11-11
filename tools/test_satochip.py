@@ -104,8 +104,26 @@ def main():
     sol_pubkey = bytes(resp[:32])
     print(f"[+] Solana Public Key (Ed25519 32B): {sol_pubkey.hex()}")
 
-    # 8. TEST USER PRESENCE TOUCH ON TRANSACTION SIGNING
-    print("\n--- 8. TEST USER PRESENCE ON SIGNING (P0.11 TOUCH) ---")
+    # 8. DERIVE MONERO (XMR) KEYS & ADDRESS (m/44'/128'/0')
+    print("\n--- 8. DERIVE MONERO (XMR) KEYS & ADDRESS (m/44'/128'/0') ---")
+    xmr_path = encode_bip32_path([0x8000002C, 0x80000080, 0x80000000])
+    resp, sw1, sw2 = conn.transmit([0xB0, 0x6C, 0x05, 0x00, len(xmr_path)] + xmr_path + [0x00])
+    print(f"SW: {sw1:02X}{sw2:02X} | Length: {len(resp)} bytes")
+    assert (sw1, sw2) == (0x90, 0x00)
+    spend_pub = bytes(resp[0:32])
+    view_pub  = bytes(resp[32:64])
+    view_sec  = bytes(resp[64:96])
+    addr_len  = resp[96]
+    addr_str  = bytes(resp[97:97+addr_len]).decode('ascii')
+    print(f"[+] Monero Spend Public Key (32B): {spend_pub.hex()}")
+    print(f"[+] Monero View Public Key  (32B): {view_pub.hex()}")
+    print(f"[+] Monero View Private Key (32B): {view_sec.hex()} (Exported for view-only wallet sync)")
+    print(f"[+] Monero Mainnet Address ({addr_len} chars): {addr_str}")
+    assert addr_str.startswith("4"), "Monero Mainnet address must start with 4"
+    assert addr_len == 95, f"Expected 95 chars, got {addr_len}"
+
+    # 9. TEST USER PRESENCE TOUCH ON TRANSACTION SIGNING
+    print("\n--- 9. TEST USER PRESENCE ON SIGNING (P0.11 TOUCH) ---")
     # First test: Without touching (should timeout after 3s with SW=6985)
     print("[*] Testing Touch Timeout (Do NOT touch the key)...")
     t0 = time.time()

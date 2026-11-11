@@ -225,6 +225,40 @@ bool satochip_is_pin_verified(void) {
     return s_pin_verified;
 }
 
+/* ==================== Monero Base58 Encoder ==================== */
+static const char MONERO_ALPHABET[] = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+
+static void monero_b58_encode_block(uint64_t val, int size, char *out) {
+    for (int i = size - 1; i >= 0; i--) {
+        out[i] = MONERO_ALPHABET[val % 58];
+        val /= 58;
+    }
+}
+
+static void monero_base58_encode(const uint8_t *data, size_t len, char *out) {
+    size_t full_blocks = len / 8;
+    char *ptr = out;
+    for (size_t b = 0; b < full_blocks; b++) {
+        uint64_t val = 0;
+        for (int i = 0; i < 8; i++) {
+            val = (val << 8) | data[b * 8 + i];
+        }
+        monero_b58_encode_block(val, 11, ptr);
+        ptr += 11;
+    }
+    size_t rem = len % 8;
+    if (rem > 0) {
+        uint64_t val = 0;
+        for (size_t i = 0; i < rem; i++) {
+            val = (val << 8) | data[full_blocks * 8 + i];
+        }
+        int enc_len = (rem == 5) ? 7 : (rem == 4 ? 6 : (rem == 3 ? 5 : (rem == 2 ? 3 : 2)));
+        monero_b58_encode_block(val, enc_len, ptr);
+        ptr += enc_len;
+    }
+    *ptr = '\0';
+}
+
 uint16_t satochip_process_apdu(const uint8_t *apdu, uint16_t apdu_len, uint8_t *rsp, uint16_t max_rsp_len) {
     if (apdu_len < 4) {
         rsp[0] = 0x6E; rsp[1] = 0x00; /* Class not supported */
@@ -354,6 +388,7 @@ uint16_t satochip_process_apdu(const uint8_t *apdu, uint16_t apdu_len, uint8_t *
      * P1 = 0x01: Uncompressed secp256k1 (65B: 04 || X || Y)
      * P1 = 0x02: Ethereum Address (20B)
      * P1 = 0x03: Ed25519 Public Key (32B) [Solana / TON]
+     * P1 = 0x05: Monero Keys & Address [SpendPub(32) || ViewPub(32) || ViewSec(32) || AddrLen(1) || Addr(95)]
      */
     if (ins == 0x6C) {
         if (lc < 4 || (lc % 4) != 0) {
@@ -369,7 +404,8 @@ uint16_t satochip_process_apdu(const uint8_t *apdu, uint16_t apdu_len, uint8_t *
                       data[i * 4 + 3];
         }
 
-        bool is_ed25519 = (p1 == 0x03) || (depth > 1 && (path[1] == 0x800001F5UL || path[1] == 0x8000018CUL)); /* 501' or 396' */
+        bool is_monero = (p1 == 0x05) || (depth > 1 && path[1] == 0x80000080UL); /* 128' (Monero) */
+        bool is_ed25519 = is_monero || (p1 == 0x03) || (depth > 1 && (path[1] == 0x800001F5UL || path[1] == 0x8000018CUL)); /* 501' (Solana) or 396' (TON) */
 
         uint8_t child_priv[32];
         uint8_t child_chain[32];
@@ -379,7 +415,47 @@ uint16_t satochip_process_apdu(const uint8_t *apdu, uint16_t apdu_len, uint8_t *
         }
 
         uint16_t out_len = 0;
-        if (is_ed25519) {
+        if (is_monero) {
+            /* Monero (XMR): Spend Pub (32B), View Pub (32B), View Sec (32B), Address (95B) */
+            uint8_t spend_sec[32];
+            uint8_t view_sec[32];
+            uint8_t spend_pub[32];
+            uint8_t view_pub[32];
+
+            keccak_256(child_priv, 32, spend_sec);
+            ed25519_sc_reduce32(spend_sec);
+
+            keccak_256(spend_sec, 32, view_sec);
+            ed25519_sc_reduce32(view_sec);
+
+            ed25519_scalarmult_base(spend_pub, spend_sec);
+            ed25519_scalarmult_base(view_pub, view_sec);
+
+            /* Build 69-byte raw buffer: 0x12 (mainnet) || spend_pub || view_pub || checksum */
+            uint8_t raw[69];
+            raw[0] = 0x12; /* Monero Mainnet */
+            memcpy(raw + 1, spend_pub, 32);
+            memcpy(raw + 33, view_pub, 32);
+
+            uint8_t chk[32];
+            keccak_256(raw, 65, chk);
+            memcpy(raw + 65, chk, 4);
+
+            char addr_str[96];
+            monero_base58_encode(raw, 69, addr_str);
+
+            /* Export: spend_pub(32) || view_pub(32) || view_sec(32) || addr_len(1) || addr_str(95) */
+            memcpy(rsp, spend_pub, 32);
+            memcpy(rsp + 32, view_pub, 32);
+            memcpy(rsp + 64, view_sec, 32);
+            rsp[96] = 95;
+            memcpy(rsp + 97, addr_str, 95);
+            out_len = 97 + 95;
+
+            /* Zero sensitive keys immediately */
+            crypto_zero(spend_sec, sizeof(spend_sec));
+            crypto_zero(view_sec, sizeof(view_sec));
+        } else if (is_ed25519) {
             uint8_t pk[32];
             uint8_t sk[64];
             ed25519_create_keypair(pk, sk, child_priv);
